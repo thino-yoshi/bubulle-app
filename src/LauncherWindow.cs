@@ -92,7 +92,8 @@ public sealed class LauncherWindow : Window
         for (int i = 0; i < bubbles.Count; i++)
         {
             var b = bubbles[i];
-            var v = new BubbleVisual(AppSize, IconLoader.Load(b.IconPath, b.IconIndex, b.LaunchPath), null) { ToolTip = b.Name };
+            var icon = BubbleFrame.IconFor(b);
+            var v = new BubbleVisual(AppSize, icon, icon == null ? b.Name[..1].ToUpperInvariant() : null) { ToolTip = b.Name };
             v.MouseLeftButtonUp += (_, _) => _c.ToggleApp(b);
             var menu = new ContextMenu();
             var remove = new MenuItem { Header = "Retirer la bulle" };
@@ -162,12 +163,11 @@ public sealed class LauncherWindow : Window
         if (i >= 0 && i < _apps.Count) _apps[i].SetLoading(loading);
     }
 
-    /// <summary>Centre vertical de la bulle et bords de la bande, en pixels physiques.</summary>
-    public (double CenterY, double StripLeft, double StripRight) AnchorPx(BubbleConfig bubble)
+    /// <summary>Centre vertical de la bulle et bords de la bande, en unités WPF écran.</summary>
+    public (double CenterY, double StripLeft, double StripRight) AnchorDip(BubbleConfig bubble)
     {
-        double d = Dpi;
         int i = Math.Max(0, _c.Settings.Bubbles.IndexOf(bubble));
-        return ((Top + TargetCenter(i)) * d, Left * d, (Left + StripWidth) * d);
+        return (Top + TargetCenter(i), Left, Left + StripWidth);
     }
 
     /// <summary>Haut et bas de la bulle « + » et bords de la bande, en unités WPF écran.</summary>

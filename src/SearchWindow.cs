@@ -108,6 +108,7 @@ public sealed class SearchWindow : Window
         {
             Activate();
             _box.Focus();
+            Refresh();
             _all = await AppCatalog.GetAsync() ?? new List<AppEntry>();
             Refresh();
         };
@@ -125,35 +126,73 @@ public sealed class SearchWindow : Window
     {
         string q = _box.Text.Trim();
         _placeholder.Visibility = q.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
-        if (_all.Count == 0 && !AppCatalog.GetAsync().IsCompleted) return;
 
+        var web = Filter(WebPresets.All, q).Take(q.Length == 0 ? 4 : 3).ToList();
+        var url = WebPresets.AsUrl(q);
+        if (url != null && !web.Any(w => w.Url == url))
+            web.Insert(0, new AppEntry { Kind = "Web", Name = WebPresets.HostOf(url), Url = url });
+        var apps = Filter(_all, q).Take(MaxResults - Math.Min(web.Count, 3)).ToList();
+
+        _list.Items.Clear();
+        if (web.Count > 0)
+        {
+            _list.Items.Add(SectionHeader("Web · il reste juste à se connecter"));
+            foreach (var app in web) _list.Items.Add(MakeItem(app));
+        }
+        if (apps.Count > 0)
+        {
+            _list.Items.Add(SectionHeader("Applications du PC"));
+            foreach (var app in apps) _list.Items.Add(MakeItem(app));
+        }
+        _list.SelectedIndex = _list.Items.Count > 1 ? 1 : -1;
+
+        bool loading = _all.Count == 0 && !AppCatalog.GetAsync().IsCompleted;
+        bool empty = web.Count == 0 && apps.Count == 0;
+        _status.Text = loading ? "Chargement des applications…" : "Aucune app trouvée";
+        _status.Visibility = loading || empty ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private IEnumerable<AppEntry> Filter(IEnumerable<AppEntry> source, string q)
+    {
         var compare = CultureInfo.CurrentCulture.CompareInfo;
         const CompareOptions opts = CompareOptions.IgnoreCase | CompareOptions.IgnoreNonSpace;
-        var results = _all
+        return source
             .Where(a => !_exclude(a))
             .Select(a => (app: a, pos: q.Length == 0 ? 0 : compare.IndexOf(a.Name, q, opts)))
             .Where(x => x.pos >= 0)
             .OrderBy(x => x.pos == 0 ? 0 : 1)
-            .ThenBy(x => x.app.Name, StringComparer.CurrentCultureIgnoreCase)
-            .Take(MaxResults)
-            .Select(x => x.app)
-            .ToList();
-
-        _list.Items.Clear();
-        foreach (var app in results) _list.Items.Add(MakeItem(app));
-        if (_list.Items.Count > 0) _list.SelectedIndex = 0;
-
-        _status.Text = results.Count == 0 ? "Aucune app trouvée" : "";
-        _status.Visibility = results.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            .Select(x => x.app);
     }
+
+    private static ListBoxItem SectionHeader(string text) => new()
+    {
+        Content = new TextBlock { Text = text, FontSize = 11, Foreground = new SolidColorBrush(Color.FromArgb(0x99, 0xFF, 0xFF, 0xFF)) },
+        IsEnabled = false,
+        Focusable = false,
+        Padding = new Thickness(6, 6, 6, 2),
+    };
 
     private static ListBoxItem MakeItem(AppEntry app)
     {
         var row = new StackPanel { Orientation = Orientation.Horizontal };
-        var icon = IconLoader.Load(app.IconPath, app.IconIndex, app.LaunchPath);
-        if (icon != null) row.Children.Add(new Image { Source = icon, Width = 20, Height = 20, Margin = new Thickness(0, 0, 10, 0) });
+        var icon = app.IsWeb ? IconLoader.CachedFavicon(app.Url) : IconLoader.Load(app.IconPath, app.IconIndex, app.LaunchPath);
+        if (icon != null)
+            row.Children.Add(new Image { Source = icon, Width = 20, Height = 20, Margin = new Thickness(0, 0, 10, 0) });
+        else
+            row.Children.Add(new TextBlock
+            {
+                Text = app.IsWeb ? "" : "",
+                FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),
+                FontSize = 16, Width = 20, Margin = new Thickness(0, 0, 10, 0), VerticalAlignment = VerticalAlignment.Center,
+            });
         row.Children.Add(new TextBlock { Text = app.Name, FontSize = 13, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis });
         return new ListBoxItem { Content = row, Tag = app, Padding = new Thickness(6, 5, 6, 5), Foreground = Brushes.White };
+    }
+
+    /// <summary>Pré-télécharge les icônes des apps web préréglées pour la prochaine ouverture.</summary>
+    public static void WarmWebIcons()
+    {
+        foreach (var w in WebPresets.All) _ = IconLoader.FetchFaviconAsync(w.Url);
     }
 
     private void OnBoxKey(object sender, KeyEventArgs e)
@@ -161,11 +200,11 @@ public sealed class SearchWindow : Window
         switch (e.Key)
         {
             case Key.Down:
-                if (_list.SelectedIndex < _list.Items.Count - 1) _list.SelectedIndex++;
+                Move(+1);
                 e.Handled = true;
                 break;
             case Key.Up:
-                if (_list.SelectedIndex > 0) _list.SelectedIndex--;
+                Move(-1);
                 e.Handled = true;
                 break;
             case Key.Enter:
@@ -176,6 +215,20 @@ public sealed class SearchWindow : Window
                 SafeClose();
                 e.Handled = true;
                 break;
+        }
+    }
+
+    /// <summary>Déplace la sélection en sautant les titres de section.</summary>
+    private void Move(int step)
+    {
+        for (int i = _list.SelectedIndex + step; i >= 0 && i < _list.Items.Count; i += step)
+        {
+            if (_list.Items[i] is ListBoxItem { Tag: AppEntry })
+            {
+                _list.SelectedIndex = i;
+                _list.ScrollIntoView(_list.Items[i]);
+                return;
+            }
         }
     }
 

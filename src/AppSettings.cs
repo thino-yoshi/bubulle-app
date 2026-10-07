@@ -7,6 +7,10 @@ namespace Bulles;
 
 public class BubbleConfig
 {
+    /// <summary>"App" = vraie fenêtre Windows mise dans le cadre, "Web" = page intégrée à Bulles.</summary>
+    public string Kind { get; set; } = "App";
+    public string Url { get; set; } = "";
+    public bool IsWeb => Kind == "Web";
     public string Name { get; set; } = "";
     public string LaunchPath { get; set; } = "";
     public string ProcessName { get; set; } = "";
@@ -16,7 +20,7 @@ public class BubbleConfig
     /// <summary>Opacité en %, 0 = valeur par défaut des paramètres.</summary>
     public int Opacity { get; set; }
 
-    /// <summary>Taille mémorisée en pixels physiques, 0 = taille par défaut.</summary>
+    /// <summary>Taille mémorisée de la bulle-fenêtre (unités WPF), 0 = taille par défaut.</summary>
     public int Width { get; set; }
     public int Height { get; set; }
 

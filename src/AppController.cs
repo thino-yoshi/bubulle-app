@@ -1,20 +1,21 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
-using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Interop;
+using Microsoft.Web.WebView2.Core;
 using Microsoft.Win32;
 using Forms = System.Windows.Forms;
 
 namespace Bulles;
 
-/// <summary>Chef d'orchestre : bulles, raccourcis, recherche et fenêtres attachées.</summary>
+/// <summary>Chef d'orchestre : bulles, raccourcis, recherche et bulles-fenêtres.</summary>
 public sealed class AppController : IDisposable
 {
-    private const int WindowGap = 6;
+    private const double FrameGap = 4;
 
     public AppSettings Settings { get; }
 
@@ -25,26 +26,16 @@ public sealed class AppController : IDisposable
     private readonly IntPtr _foregroundHook;
     private readonly uint _ourPid = (uint)Environment.ProcessId;
     private readonly Dictionary<BubbleConfig, IntPtr> _lastHwnd = new();
+    private readonly Dictionary<BubbleConfig, BubbleFrame> _frames = new();
 
-    private AttachedWindow? _current;
+    private BubbleFrame? _current;
+    private IntPtr _returnFocus;
     private SearchWindow? _search;
     private SettingsWindow? _settingsWindow;
     private DateTime _searchClosedAt;
     private IntPtr _lastExternalForeground;
+    private Task<CoreWebView2Environment>? _webEnv;
     private bool _busy, _disposed;
-
-    /// <summary>État d'origine d'une fenêtre qu'on a prise en main, pour la rendre intacte.</summary>
-    private sealed class AttachedWindow
-    {
-        public IntPtr Hwnd;
-        public BubbleConfig Bubble = null!;
-        public Native.WINDOWPLACEMENT Placement;
-        public long ExStyle;
-        public byte OriginalAlpha = 255;
-        public uint OriginalAlphaFlags;
-        public int ShownWidth, ShownHeight;
-        public IntPtr ReturnFocus;
-    }
 
     public AppController(AppSettings settings)
     {
@@ -68,7 +59,12 @@ public sealed class AppController : IDisposable
 
         // Prépare la liste des apps en arrière-plan pour que la recherche soit instantanée.
         _ = AppCatalog.GetAsync();
+        SearchWindow.WarmWebIcons();
     }
+
+    /// <summary>Un seul moteur web partagé : tes connexions (Discord, etc.) sont gardées entre les sessions.</summary>
+    private Task<CoreWebView2Environment> WebEnvironment() =>
+        _webEnv ??= CoreWebView2Environment.CreateAsync(null, Path.Combine(AppSettings.Dir, "WebData"));
 
     // ---------- Bulle principale ----------
 
@@ -85,7 +81,7 @@ public sealed class AppController : IDisposable
         if (_launcher.IsOpen) _launcher.Close();
     }
 
-    // ---------- Fenêtres attachées ----------
+    // ---------- Bulles-fenêtres ----------
 
     public async void ToggleApp(BubbleConfig bubble) => await ToggleAppAsync(bubble, fromHotkey: false);
 
@@ -102,33 +98,94 @@ public sealed class AppController : IDisposable
 
         if (fromHotkey && !_launcher.IsOpen) _launcher.Open();
 
-        var returnFocus = _current?.ReturnFocus ?? _lastExternalForeground;
+        var returnFocus = _current != null ? _returnFocus : _lastExternalForeground;
         HideCurrent(restoreFocus: false);
 
         _busy = true;
         _launcher.SetLoading(bubble, true);
         try
         {
-            _lastHwnd.TryGetValue(bubble, out var preferred);
-            var hwnd = WindowFinder.Find(bubble.ProcessName, preferred);
-            if (hwnd == IntPtr.Zero)
-            {
-                if (!Launch(bubble)) return;
-                hwnd = await WaitForWindow(bubble);
-            }
-            if (hwnd == IntPtr.Zero)
-            {
-                Notify($"Je n'ai pas trouvé la fenêtre de {bubble.Name}.");
-                return;
-            }
-            _lastHwnd[bubble] = hwnd;
-            if (_launcher.IsOpen) Attach(bubble, hwnd, returnFocus);
+            if (bubble.IsWeb) await ShowWeb(bubble);
+            else await ShowApp(bubble);
+            if (_current != null) _returnFocus = returnFocus;
+        }
+        catch (Exception ex)
+        {
+            App.Log(ex);
+            Notify($"Impossible d'ouvrir {bubble.Name}.");
         }
         finally
         {
             _busy = false;
             _launcher.SetLoading(bubble, false);
         }
+    }
+
+    private BubbleFrame GetFrame(BubbleConfig bubble)
+    {
+        if (!_frames.TryGetValue(bubble, out var frame))
+        {
+            frame = new BubbleFrame(this, bubble, bubble.Opacity > 0 ? bubble.Opacity : Settings.DefaultOpacity);
+            _frames[bubble] = frame;
+        }
+        PlaceFrame(frame);
+        return frame;
+    }
+
+    private async Task ShowWeb(BubbleConfig bubble)
+    {
+        var frame = GetFrame(bubble);
+        frame.Show();
+        Activate(frame);
+        // La page reste chargée quand la bulle est cachée (Discord reste connecté, le vocal continue).
+        await frame.InitWebAsync(await WebEnvironment());
+        frame.FocusContent();
+    }
+
+    private async Task ShowApp(BubbleConfig bubble)
+    {
+        _lastHwnd.TryGetValue(bubble, out var preferred);
+        var hwnd = WindowFinder.Find(bubble.ProcessName, preferred);
+        if (hwnd == IntPtr.Zero)
+        {
+            if (!Launch(bubble)) return;
+            hwnd = await WaitForWindow(bubble);
+        }
+        if (hwnd == IntPtr.Zero)
+        {
+            Notify($"Je n'ai pas trouvé la fenêtre de {bubble.Name}.");
+            return;
+        }
+        if (!_launcher.IsOpen) return;
+        _lastHwnd[bubble] = hwnd;
+
+        var frame = GetFrame(bubble);
+        frame.Show();
+        Activate(frame);
+        frame.AttachNative(hwnd);
+        frame.FocusContent();
+    }
+
+    private void Activate(BubbleFrame frame)
+    {
+        _current = frame;
+        _launcher.SetActive(frame.Bubble);
+        frame.Activate();
+    }
+
+    /// <summary>Place la bulle-fenêtre à côté de sa bulle, centrée verticalement sur elle.</summary>
+    private void PlaceFrame(BubbleFrame frame)
+    {
+        var b = frame.Bubble;
+        var wa = SystemParameters.WorkArea;
+        var (centerY, stripLeft, stripRight) = _launcher.AnchorDip(b);
+        double maxWidth = wa.Width - LauncherWindow.StripWidth - 2 * FrameGap;
+        double width = Math.Min(b.Width > 0 ? b.Width : wa.Width * Settings.DefaultWidthPct / 100, maxWidth);
+        double height = Math.Min(b.Height > 0 ? b.Height : wa.Height * Settings.DefaultHeightPct / 100, wa.Height - 2 * FrameGap);
+        frame.Width = width;
+        frame.Height = height;
+        frame.Left = Settings.IsLeft ? stripRight - 8 : stripLeft + 8 - width;
+        frame.Top = Math.Clamp(centerY - height / 2, wa.Top + FrameGap, wa.Bottom - height - FrameGap);
     }
 
     private bool Launch(BubbleConfig bubble)
@@ -162,93 +219,47 @@ public sealed class AppController : IDisposable
         return IntPtr.Zero;
     }
 
-    private void Attach(BubbleConfig bubble, IntPtr hwnd, IntPtr returnFocus)
+    public void HideFrame(BubbleFrame frame)
     {
-        var w = new AttachedWindow
-        {
-            Hwnd = hwnd,
-            Bubble = bubble,
-            ReturnFocus = returnFocus,
-            ExStyle = Native.GetExStyle(hwnd),
-            Placement = new Native.WINDOWPLACEMENT { length = Marshal.SizeOf<Native.WINDOWPLACEMENT>() },
-        };
-        Native.GetWindowPlacement(hwnd, ref w.Placement);
-        if ((w.ExStyle & Native.WS_EX_LAYERED) != 0)
-            Native.GetLayeredWindowAttributes(hwnd, out _, out w.OriginalAlpha, out w.OriginalAlphaFlags);
-
-        if (Native.IsIconic(hwnd) || w.Placement.showCmd == Native.SW_SHOWMAXIMIZED)
-            Native.ShowWindow(hwnd, Native.SW_RESTORE);
-
-        var wa = Forms.Screen.PrimaryScreen!.WorkingArea;
-        var (centerY, stripLeft, stripRight) = _launcher.AnchorPx(bubble);
-        int maxWidth = (int)(wa.Width - (stripRight - stripLeft) - 2 * WindowGap);
-        int width = Math.Min(bubble.Width > 0 ? bubble.Width : wa.Width * Settings.DefaultWidthPct / 100, maxWidth);
-        int height = Math.Min(bubble.Height > 0 ? bubble.Height : wa.Height * Settings.DefaultHeightPct / 100, wa.Height - 2 * WindowGap);
-        int x = Settings.IsLeft ? (int)stripRight - WindowGap : (int)stripLeft + WindowGap - width;
-        int y = Math.Clamp((int)(centerY - height / 2.0), wa.Top + WindowGap, wa.Bottom - height - WindowGap);
-
-        Native.SetWindowPos(hwnd, Native.HWND_TOPMOST, x, y, width, height, Native.SWP_SHOWWINDOW);
-        w.ShownWidth = width;
-        w.ShownHeight = height;
-
-        int corner = Native.DWMWCP_ROUND;
-        Native.DwmSetWindowAttribute(hwnd, Native.DWMWA_WINDOW_CORNER_PREFERENCE, ref corner, sizeof(int));
-
-        int opacity = bubble.Opacity > 0 ? bubble.Opacity : Settings.DefaultOpacity;
-        if (opacity < 100)
-        {
-            Native.SetExStyle(hwnd, w.ExStyle | Native.WS_EX_LAYERED);
-            Native.SetLayeredWindowAttributes(hwnd, 0, (byte)(opacity * 255 / 100), Native.LWA_ALPHA);
-        }
-
-        _current = w;
-        Native.SetForegroundWindow(hwnd);
-        _launcher.SetActive(bubble);
+        if (_current == frame) HideCurrent(restoreFocus: true);
+        else frame.Hide();
     }
 
     private void HideCurrent(bool restoreFocus)
     {
-        var w = _current;
-        if (w == null) return;
+        var frame = _current;
+        if (frame == null) return;
         _current = null;
         _launcher.SetActive(null);
 
-        if (Native.IsWindow(w.Hwnd))
+        // Mémorise la taille et l'opacité réglées pour cette bulle.
+        var b = frame.Bubble;
+        if (frame.ActualWidth > 0)
         {
-            // Mémorise la taille si tu as redimensionné la fenêtre.
-            if (!Native.IsIconic(w.Hwnd) && Native.GetWindowRect(w.Hwnd, out var r) &&
-                (Math.Abs(r.Width - w.ShownWidth) > 2 || Math.Abs(r.Height - w.ShownHeight) > 2))
-            {
-                w.Bubble.Width = r.Width;
-                w.Bubble.Height = r.Height;
-                Settings.Save();
-            }
-
-            Native.SetWindowPos(w.Hwnd, Native.HWND_NOTOPMOST, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
-            if ((w.ExStyle & Native.WS_EX_LAYERED) != 0)
-                Native.SetLayeredWindowAttributes(w.Hwnd, 0, w.OriginalAlpha, w.OriginalAlphaFlags);
-            Native.SetExStyle(w.Hwnd, w.ExStyle);
-            int corner = Native.DWMWCP_DEFAULT;
-            Native.DwmSetWindowAttribute(w.Hwnd, Native.DWMWA_WINDOW_CORNER_PREFERENCE, ref corner, sizeof(int));
-
-            // Remet la position d'origine et réduit la fenêtre pour qu'elle ne gêne pas le jeu.
-            var p = w.Placement;
-            p.showCmd = Native.SW_SHOWMINNOACTIVE;
-            Native.SetWindowPlacement(w.Hwnd, ref p);
+            b.Width = (int)Math.Round(frame.ActualWidth);
+            b.Height = (int)Math.Round(frame.ActualHeight);
         }
+        b.Opacity = frame.OpacityPercent == Settings.DefaultOpacity ? 0 : frame.OpacityPercent;
+        Settings.Save();
 
-        if (restoreFocus && w.ReturnFocus != IntPtr.Zero && w.ReturnFocus != w.Hwnd &&
-            Native.IsWindow(w.ReturnFocus) && !Native.IsIconic(w.ReturnFocus))
-            Native.SetForegroundWindow(w.ReturnFocus);
+        frame.DetachNative(minimize: true);
+        frame.Hide();
+
+        var focus = _returnFocus;
+        if (restoreFocus && focus != IntPtr.Zero && Native.IsWindow(focus) && !Native.IsIconic(focus))
+            Native.SetForegroundWindow(focus);
     }
 
     private void OnForegroundChanged(IntPtr hook, uint ev, IntPtr hwnd, int idObject, int idChild, uint thread, uint time)
     {
         if (hwnd == IntPtr.Zero || Native.ProcessId(hwnd) == _ourPid) return;
-        if (_current != null && hwnd == _current.Hwnd) return;
+        if (_current != null && hwnd == _current.NativeHwnd) return;
+        // Les fenêtres du moteur web (msedgewebview2) appartiennent à Bulles.
+        if (Native.ClassName(hwnd).StartsWith("Chrome_WidgetWin", StringComparison.Ordinal) &&
+            Native.ProcessPath(hwnd)?.EndsWith("msedgewebview2.exe", StringComparison.OrdinalIgnoreCase) == true) return;
         _lastExternalForeground = hwnd;
 
-        if (_current != null && Settings.AutoHide && !_busy)
+        if (_current != null && Settings.AutoHide && !_current.Pinned && !_busy)
             HideCurrent(restoreFocus: false);
     }
 
@@ -267,10 +278,10 @@ public sealed class AppController : IDisposable
         HideCurrent(restoreFocus: false);
         var (top, bottom, stripLeft, stripRight, down) = _launcher.PlusAnchor();
         const double width = 300;
-        double left = Settings.IsLeft ? stripRight - WindowGap : stripLeft + WindowGap - width;
+        double left = Settings.IsLeft ? stripRight - 6 : stripLeft + 6 - width;
 
         _search = new SearchWindow(IsAlreadyBubble, left, down ? top - 8 : bottom + 8, growsUp: !down);
-        _search.Picked += AddBubble;
+        _search.Picked += app => _ = AddBubble(app);
         _search.Closed += (_, _) =>
         {
             _search = null;
@@ -280,21 +291,28 @@ public sealed class AppController : IDisposable
     }
 
     private bool IsAlreadyBubble(AppEntry app) =>
-        Settings.Bubbles.Any(b => b.LaunchPath.Equals(app.LaunchPath, StringComparison.OrdinalIgnoreCase) ||
-                                  b.Name.Equals(app.Name, StringComparison.OrdinalIgnoreCase));
+        Settings.Bubbles.Any(b => app.IsWeb
+            ? b.IsWeb && b.Url.Equals(app.Url, StringComparison.OrdinalIgnoreCase)
+            : !b.IsWeb && (b.LaunchPath.Equals(app.LaunchPath, StringComparison.OrdinalIgnoreCase) ||
+                           b.Name.Equals(app.Name, StringComparison.OrdinalIgnoreCase)));
 
-    private void AddBubble(AppEntry app)
+    private async Task AddBubble(AppEntry app)
     {
         int n = Settings.Bubbles.Count;
-        Settings.Bubbles.Add(new BubbleConfig
+        var bubble = new BubbleConfig
         {
+            Kind = app.Kind,
+            Url = app.Url,
             Name = app.Name,
             LaunchPath = app.LaunchPath,
             ProcessName = app.ProcessName,
             IconPath = app.IconPath,
             IconIndex = app.IconIndex,
             Hotkey = n < 9 ? $"Alt+{n + 1}" : "",
-        });
+        };
+        if (bubble.IsWeb) bubble.IconPath = await IconLoader.FetchFaviconAsync(bubble.Url);
+
+        Settings.Bubbles.Add(bubble);
         Settings.Save();
         _launcher.Rebuild();
         RegisterHotkeys();
@@ -303,6 +321,11 @@ public sealed class AppController : IDisposable
     public void RemoveBubble(BubbleConfig bubble)
     {
         if (_current?.Bubble == bubble) HideCurrent(restoreFocus: true);
+        if (_frames.Remove(bubble, out var frame))
+        {
+            frame.DisposeContent();
+            frame.Close();
+        }
         Settings.Bubbles.Remove(bubble);
         _lastHwnd.Remove(bubble);
         Settings.Save();
@@ -383,7 +406,7 @@ public sealed class AppController : IDisposable
         var tray = new Forms.NotifyIcon
         {
             Icon = MakeTrayIcon(),
-            Text = "Bulles v0.0.1",
+            Text = "Bulles v0.0.2",
             ContextMenuStrip = menu,
             Visible = true,
         };
@@ -426,8 +449,9 @@ public sealed class AppController : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
-        // Rend toujours la fenêtre empruntée dans son état d'origine (plus au premier plan, plus transparente).
+        // Rend toujours les fenêtres empruntées dans leur état d'origine.
         HideCurrent(restoreFocus: false);
+        foreach (var frame in _frames.Values) frame.DisposeContent();
         _hotkeys.Dispose();
         Native.UnhookWinEvent(_foregroundHook);
         SystemEvents.DisplaySettingsChanged -= OnDisplayChanged;

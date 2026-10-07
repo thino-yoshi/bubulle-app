@@ -15,6 +15,9 @@ namespace Bulles;
 
 public sealed class AppEntry
 {
+    public string Kind { get; init; } = "App";
+    public string Url { get; init; } = "";
+    public bool IsWeb => Kind == "Web";
     public string Name { get; init; } = "";
     public string LaunchPath { get; init; } = "";
     public string ProcessName { get; init; } = "";
@@ -30,7 +33,7 @@ public static class AppCatalog
     private static readonly string[] JunkWords =
     {
         "uninstall", "désinstall", "desinstall", "readme", "lisez-moi", "release notes",
-        "documentation", "website", "site web", "license", "licence",
+        "documentation", "website", "site web", "license", "licence", "add a new",
     };
 
     public static Task<List<AppEntry>> GetAsync() => _loading ??= RunOnSta(Scan);
@@ -142,9 +145,77 @@ public static class AppCatalog
     }
 }
 
+/// <summary>Apps web préréglées : il ne reste plus qu'à se connecter.</summary>
+public static class WebPresets
+{
+    public const string BrowserUrl = "https://www.google.com";
+
+    public static readonly IReadOnlyList<AppEntry> All = new[]
+    {
+        Web("Discord", "https://discord.com/app"),
+        Web("Messenger", "https://www.messenger.com"),
+        Web("WhatsApp", "https://web.whatsapp.com"),
+        Web("YouTube", "https://www.youtube.com"),
+        Web("Twitch", "https://www.twitch.tv"),
+        Web("ChatGPT", "https://chatgpt.com"),
+        Web("Claude", "https://claude.ai"),
+        Web("Gmail", "https://mail.google.com"),
+        Web("Instagram", "https://www.instagram.com"),
+        Web("X (Twitter)", "https://x.com"),
+        Web("Reddit", "https://www.reddit.com"),
+        Web("Navigateur web", BrowserUrl),
+    };
+
+    private static AppEntry Web(string name, string url) => new() { Kind = "Web", Name = name, Url = url };
+
+    /// <summary>Transforme « wiki.ffxiv.com » ou « https://… » en adresse web, sinon null.</summary>
+    public static string? AsUrl(string text)
+    {
+        text = text.Trim();
+        if (text.Length < 4 || text.Contains(' ')) return null;
+        if (!text.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !text.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!text.Contains('.')) return null;
+            text = "https://" + text;
+        }
+        return Uri.TryCreate(text, UriKind.Absolute, out var uri) && uri.Host.Contains('.') ? uri.ToString() : null;
+    }
+
+    public static string HostOf(string url) => Uri.TryCreate(url, UriKind.Absolute, out var u) ? u.Host : url;
+}
+
 public static class IconLoader
 {
     private static readonly Dictionary<string, ImageSource?> Cache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly System.Net.Http.HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(6) };
+    private static string IconDir => Path.Combine(AppSettings.Dir, "icons");
+
+    /// <summary>Télécharge (une fois) l'icône d'un site et renvoie le chemin du fichier, ou "" si échec.</summary>
+    public static async Task<string> FetchFaviconAsync(string url)
+    {
+        var host = WebPresets.HostOf(url);
+        var file = Path.Combine(IconDir, host + ".png");
+        if (File.Exists(file)) return file;
+        try
+        {
+            var bytes = await Http.GetByteArrayAsync($"https://www.google.com/s2/favicons?domain={Uri.EscapeDataString(host)}&sz=128");
+            Directory.CreateDirectory(IconDir);
+            await File.WriteAllBytesAsync(file, bytes);
+            return file;
+        }
+        catch (Exception ex)
+        {
+            App.Log(ex);
+            return "";
+        }
+    }
+
+    /// <summary>Icône déjà téléchargée pour ce site, sans requête réseau.</summary>
+    public static ImageSource? CachedFavicon(string url)
+    {
+        var file = Path.Combine(IconDir, WebPresets.HostOf(url) + ".png");
+        return File.Exists(file) ? Load(file, 0, "") : null;
+    }
 
     public static ImageSource? Load(string iconPath, int iconIndex, string fallbackPath)
     {
@@ -156,7 +227,17 @@ public static class IconLoader
         {
             if (!string.IsNullOrEmpty(iconPath) && File.Exists(iconPath))
             {
-                if (iconPath.EndsWith(".ico", StringComparison.OrdinalIgnoreCase))
+                if (iconPath.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
+                {
+                    var bmp = new BitmapImage();
+                    bmp.BeginInit();
+                    bmp.CacheOption = BitmapCacheOption.OnLoad;
+                    bmp.UriSource = new Uri(iconPath);
+                    bmp.EndInit();
+                    bmp.Freeze();
+                    image = bmp;
+                }
+                else if (iconPath.EndsWith(".ico", StringComparison.OrdinalIgnoreCase))
                 {
                     using var ico = new System.Drawing.Icon(iconPath, 256, 256);
                     image = ToSource(ico.Handle);

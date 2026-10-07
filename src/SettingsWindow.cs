@@ -65,7 +65,7 @@ public sealed class SettingsWindow : Window
     public SettingsWindow(AppSettings settings)
     {
         _s = settings;
-        Title = "Bulles — paramètres (v0.0.1)";
+        Title = "Bulles — paramètres (v0.0.2)";
         Width = 560;
         SizeToContent = SizeToContent.Height;
         MaxHeight = SystemParameters.WorkArea.Height - 40;

@@ -6,22 +6,24 @@ namespace Bulles;
 
 internal static class Native
 {
-    public const int GWL_EXSTYLE = -20;
+    public const int GWL_EXSTYLE = -20, GWL_STYLE = -16, GWLP_HWNDPARENT = -8;
+    public const long WS_CAPTION = 0xC00000, WS_THICKFRAME = 0x40000, WS_MAXIMIZE = 0x1000000;
     public const long WS_EX_TOOLWINDOW = 0x80;
     public const long WS_EX_LAYERED = 0x80000;
     public const uint LWA_ALPHA = 0x2;
 
     public static readonly IntPtr HWND_TOPMOST = new(-1);
     public static readonly IntPtr HWND_NOTOPMOST = new(-2);
-    public const uint SWP_NOSIZE = 0x1, SWP_NOMOVE = 0x2, SWP_NOACTIVATE = 0x10, SWP_SHOWWINDOW = 0x40;
+    public const uint SWP_NOSIZE = 0x1, SWP_NOMOVE = 0x2, SWP_NOZORDER = 0x4, SWP_NOACTIVATE = 0x10,
+        SWP_FRAMECHANGED = 0x20, SWP_SHOWWINDOW = 0x40;
 
-    public const int SW_SHOWMAXIMIZED = 3, SW_SHOWMINNOACTIVE = 7, SW_RESTORE = 9;
+    public const int SW_SHOWNORMAL = 1, SW_SHOWMAXIMIZED = 3, SW_SHOWMINNOACTIVE = 7, SW_RESTORE = 9;
     public const int GW_OWNER = 4;
 
     public const int WM_HOTKEY = 0x312, WM_SYSCOMMAND = 0x112, SC_KEYMENU = 0xF100;
     public const uint MOD_ALT = 0x1, MOD_CONTROL = 0x2, MOD_SHIFT = 0x4, MOD_WIN = 0x8, MOD_NOREPEAT = 0x4000;
 
-    public const int DWMWA_CLOAKED = 14, DWMWA_WINDOW_CORNER_PREFERENCE = 33;
+    public const int DWMWA_CLOAKED = 14, DWMWA_WINDOW_CORNER_PREFERENCE = 33, DWMWA_BORDER_COLOR = 34;
     public const int DWMWCP_DEFAULT = 0, DWMWCP_ROUND = 2;
 
     public const uint EVENT_SYSTEM_FOREGROUND = 3, WINEVENT_OUTOFCONTEXT = 0;
@@ -64,6 +66,7 @@ internal static class Native
     [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr h);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
     [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
+    [DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr h);
     [DllImport("user32.dll")] public static extern IntPtr GetWindow(IntPtr h, int cmd);
     [DllImport("user32.dll")] public static extern int GetWindowTextLength(IntPtr h);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr h, StringBuilder sb, int max);
@@ -92,6 +95,21 @@ internal static class Native
 
     public static long GetExStyle(IntPtr h) => GetWindowLongPtr(h, GWL_EXSTYLE).ToInt64();
     public static void SetExStyle(IntPtr h, long style) => SetWindowLongPtr(h, GWL_EXSTYLE, new IntPtr(style));
+    public static long GetStyle(IntPtr h) => GetWindowLongPtr(h, GWL_STYLE).ToInt64();
+    public static void SetStyle(IntPtr h, long style) => SetWindowLongPtr(h, GWL_STYLE, new IntPtr(style));
+
+    /// <summary>Applique une opacité globale (0-100 %) à une fenêtre, ou la retire à 100 %.</summary>
+    public static void SetOpacity(IntPtr h, int percent, long baseExStyle)
+    {
+        if (percent >= 100)
+        {
+            if ((baseExStyle & WS_EX_LAYERED) == 0) SetExStyle(h, GetExStyle(h) & ~WS_EX_LAYERED);
+            else SetLayeredWindowAttributes(h, 0, 255, LWA_ALPHA);
+            return;
+        }
+        SetExStyle(h, GetExStyle(h) | WS_EX_LAYERED);
+        SetLayeredWindowAttributes(h, 0, (byte)(Math.Clamp(percent, 10, 100) * 255 / 100), LWA_ALPHA);
+    }
 
     public static string ClassName(IntPtr h)
     {
