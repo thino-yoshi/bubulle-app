@@ -22,6 +22,7 @@ namespace Bulles;
 public sealed class BubbleFrame : Window
 {
     private const double HeaderHeight = 38, Inset = 5, FrameRadius = 16, ContentRadius = 11;
+    private const double DefaultMinWidth = 300, DefaultMinHeight = 220;
 
     private static readonly Brush FrameBg = Frozen(new SolidColorBrush(Color.FromRgb(0x12, 0x15, 0x1C)));
     private static readonly Brush HeaderFg = Frozen(new SolidColorBrush(Color.FromArgb(0xDD, 0xFF, 0xFF, 0xFF)));
@@ -62,8 +63,8 @@ public sealed class BubbleFrame : Window
         AllowsTransparency = true;
         Background = Brushes.Transparent;
         Opacity = 0;
-        MinWidth = 300;
-        MinHeight = 220;
+        MinWidth = DefaultMinWidth;
+        MinHeight = DefaultMinHeight;
         WindowChrome.SetWindowChrome(this, new WindowChrome
         {
             CaptionHeight = 0,
@@ -158,6 +159,50 @@ public sealed class BubbleFrame : Window
             await Task.Delay(150);
             RestoreLook(released);
         }
+    }
+
+    /// <summary>L'app est gardée dans sa bulle, invisible et hors écran, prête à réapparaître.</summary>
+    public bool HasParkedNative => _native != IntPtr.Zero && Native.IsWindow(_native) && Native.IsWindowVisible(_native);
+
+    /// <summary>
+    /// Fondu de sortie, puis l'app est « garée » hors de l'écran au lieu d'être réduite :
+    /// pas besoin de la redessiner à la prochaine ouverture, elle réapparaît instantanément.
+    /// </summary>
+    public Task ParkAnimatedAsync()
+    {
+        HideTask = Run();
+        return HideTask;
+
+        async Task Run()
+        {
+            await Fade(0, 130);
+            _sync.Stop();
+            if (_native != IntPtr.Zero && Native.IsWindow(_native))
+            {
+                var screen = System.Windows.Forms.SystemInformation.VirtualScreen;
+                Native.SetWindowPos(_native, Native.HWND_NOTOPMOST, screen.Right + 200, screen.Top, 0, 0,
+                    Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
+            }
+            Hide();
+        }
+    }
+
+    /// <summary>Ramène l'app garée dans le cadre. Retourne true si elle doit d'abord se redessiner.</summary>
+    public bool Unpark()
+    {
+        bool mustRepaint = false;
+        // Réduite ou agrandie entre-temps (bouton de l'app) : on la remet en état normal, toujours invisible.
+        for (int i = 0; i < 3 && (Native.IsIconic(_native) || Native.IsZoomed(_native)); i++)
+        {
+            Native.ShowWindow(_native, Native.SW_RESTORE);
+            mustRepaint = true;
+        }
+        if (mustRepaint)
+            Native.SetStyle(_native, Native.GetStyle(_native) & ~(Native.WS_CAPTION | Native.WS_THICKFRAME | Native.WS_MAXIMIZE));
+        RaiseNative();
+        SyncNative();
+        _sync.Start();
+        return mustRepaint;
     }
 
     private async Task Fade(byte to, int durationMs)
@@ -335,6 +380,8 @@ public sealed class BubbleFrame : Window
     public IntPtr DetachNative(bool minimize, bool restoreLook = true)
     {
         _sync.Stop();
+        MinWidth = DefaultMinWidth;
+        MinHeight = DefaultMinHeight;
         var h = _native;
         if (h == IntPtr.Zero) return IntPtr.Zero;
         _native = IntPtr.Zero;
@@ -377,11 +424,18 @@ public sealed class BubbleFrame : Window
 
     private void SyncNative()
     {
-        if (_native == IntPtr.Zero || !IsVisible) return;
+        if (_native == IntPtr.Zero || !IsVisible || _enforcing) return;
         if (!Native.IsWindow(_native) || !Native.IsWindowVisible(_native))
         {
             // L'app a été fermée (ou s'est cachée dans la zone de notification) : on lui rend son état d'origine.
             DetachNative(minimize: false);
+            _c.HideFrame(this);
+            return;
+        }
+        // Bouton « réduire » de l'app : on cache simplement la bulle.
+        if (Native.IsIconic(_native))
+        {
+            _sync.Stop();
             _c.HideFrame(this);
             return;
         }
@@ -394,7 +448,49 @@ public sealed class BubbleFrame : Window
         int w = (int)Math.Round(bottomRight.X - topLeft.X), h = (int)Math.Round(bottomRight.Y - topLeft.Y);
         if (Native.GetWindowRect(_native, out var r) && r.Left == x && r.Top == y && r.Width == w && r.Height == h) return;
         Native.SetWindowPos(_native, IntPtr.Zero, x, y, w, h, Native.SWP_NOZORDER | Native.SWP_NOACTIVATE);
+        EnforceNativeMinimum(w, h);
     }
+
+    /// <summary>
+    /// Chaque app a une taille minimale (Chrome ~500 px de large) : si elle refuse de rétrécir,
+    /// la bulle s'arrête à cette taille au lieu de laisser l'app déborder hors du cadre.
+    /// </summary>
+    private void EnforceNativeMinimum(int requestedW, int requestedH)
+    {
+        if (!Native.GetWindowRect(_native, out var actual)) return;
+        int extraW = actual.Width - requestedW, extraH = actual.Height - requestedH;
+        if (extraW <= 1 && extraH <= 1) return;
+
+        double dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
+        double width = ActualWidth + Math.Max(0, extraW) / dpi;
+        double height = ActualHeight + Math.Max(0, extraH) / dpi;
+        // Bulle collée à droite de l'écran : elle grandit vers la gauche (bord droit fixe) pour rester visible.
+        double right = Left + ActualWidth;
+        double left = _c.Settings.IsLeft ? Left : Math.Max(SystemParameters.WorkArea.Left, right - width);
+
+        _enforcing = true;
+        try
+        {
+            MinWidth = Math.Max(MinWidth, width);
+            MinHeight = Math.Max(MinHeight, height);
+            Left = left;
+            Width = width;
+            Height = height;
+        }
+        finally
+        {
+            _enforcing = false;
+        }
+        UpdateLayout();
+        if (_resyncing) return;
+        _resyncing = true;
+        try { SyncNative(); }
+        finally { _resyncing = false; }
+    }
+
+    private bool _resyncing;
+
+    private bool _enforcing;
 
     private void RaiseNative()
     {

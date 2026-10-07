@@ -155,6 +155,24 @@ public sealed class AppController : IDisposable
 
     private async Task ShowApp(BubbleConfig bubble)
     {
+        // L'app est déjà garée dans sa bulle : elle réapparaît tout de suite, sans relancement ni rechargement.
+        if (_frames.TryGetValue(bubble, out var parked))
+        {
+            await parked.HideTask;
+            if (parked.HasParkedNative)
+            {
+                parked.PrepareShow();
+                PlaceFrame(parked);
+                parked.Show();
+                Activate(parked);
+                bool repaint = parked.Unpark();
+                parked.FocusContent();
+                await Task.Delay(repaint ? 320 : 40);
+                await parked.FadeInAsync();
+                return;
+            }
+        }
+
         _lastHwnd.TryGetValue(bubble, out var preferred);
         var hwnd = WindowFinder.Find(bubble.ProcessName, preferred);
         if (hwnd == IntPtr.Zero)
@@ -258,7 +276,8 @@ public sealed class AppController : IDisposable
 
         if (animate)
         {
-            _ = frame.HideAnimatedAsync();
+            // App Windows : garée dans sa bulle (réouverture instantanée). Page web : simplement cachée.
+            _ = b.IsWeb ? frame.HideAnimatedAsync() : frame.ParkAnimatedAsync();
         }
         else
         {
