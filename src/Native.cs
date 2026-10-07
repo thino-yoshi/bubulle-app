@@ -7,7 +7,7 @@ namespace Bulles;
 internal static class Native
 {
     public const int GWL_EXSTYLE = -20, GWL_STYLE = -16, GWLP_HWNDPARENT = -8;
-    public const long WS_CAPTION = 0xC00000, WS_THICKFRAME = 0x40000, WS_MAXIMIZE = 0x1000000;
+    public const long WS_CAPTION = 0xC00000, WS_THICKFRAME = 0x40000, WS_MAXIMIZE = 0x1000000, WS_MINIMIZE = 0x20000000;
     public const long WS_EX_TOOLWINDOW = 0x80;
     public const long WS_EX_LAYERED = 0x80000;
     public const uint LWA_ALPHA = 0x2;

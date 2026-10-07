@@ -259,7 +259,10 @@ public sealed class BubbleFrame : Window
         if (!Native.IsWindow(h)) return;
 
         Native.SetWindowLongPtr(h, Native.GWLP_HWNDPARENT, _nativeOwner);
-        Native.SetStyle(h, _nativeStyle);
+        // On rend les styles d'origine SAUF les bits d'état réduit/agrandi : recopier « réduit » sur une
+        // fenêtre affichée la laisse en fantôme gris à l'écran. L'état est rendu par SetWindowPlacement.
+        const long stateBits = Native.WS_MINIMIZE | Native.WS_MAXIMIZE;
+        Native.SetStyle(h, (_nativeStyle & ~stateBits) | (Native.GetStyle(h) & stateBits));
         Native.SetOpacity(h, 100, _nativeExStyle);
         Native.SetExStyle(h, _nativeExStyle);
         int corner = Native.DWMWCP_DEFAULT;
@@ -267,7 +270,9 @@ public sealed class BubbleFrame : Window
         Native.SetWindowPos(h, Native.HWND_NOTOPMOST, 0, 0, 0, 0,
             Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE | Native.SWP_FRAMECHANGED);
 
-        // Remet la position d'origine (et l'état agrandi si besoin), réduite pour ne pas gêner le jeu.
+        // Vraie réduction (avec son bouton dans la barre des tâches), puis remise de la position
+        // d'origine et de l'état agrandi pour quand tu la rouvriras.
+        if (minimize) Native.ShowWindow(h, Native.SW_SHOWMINNOACTIVE);
         var p = _nativePlacement;
         if (minimize) p.showCmd = Native.SW_SHOWMINNOACTIVE;
         Native.SetWindowPlacement(h, ref p);
