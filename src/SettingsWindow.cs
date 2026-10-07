@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Controls;
@@ -19,7 +19,7 @@ public sealed class HotkeyBox : TextBox
         IsReadOnlyCaretVisible = false;
         Width = 150;
         Padding = new Thickness(6, 3, 6, 3);
-        ToolTip = "Clique puis appuie sur la combinaison. Retour arriÃ¨re pour effacer.";
+        ToolTip = "Clique puis appuie sur la combinaison. Retour arrière pour effacer.";
         Value = value;
         PreviewKeyDown += OnKey;
     }
@@ -66,7 +66,7 @@ public sealed class SettingsWindow : Window
     public SettingsWindow(AppSettings settings)
     {
         _s = settings;
-        Title = "Bulles â€” paramÃ¨tres (v0.0.2)";
+        Title = "Bulles — paramètres (v0.0.2)";
         Width = 560;
         SizeToContent = SizeToContent.Height;
         MaxHeight = SystemParameters.WorkArea.Height - 40;
@@ -75,16 +75,16 @@ public sealed class SettingsWindow : Window
 
         var root = new StackPanel { Margin = new Thickness(20) };
 
-        root.Children.Add(Section("GÃ©nÃ©ral"));
+        root.Children.Add(Section("Général"));
         _mainHotkey = new HotkeyBox(Hotkey.Parse(_s.MainHotkey));
         root.Children.Add(Row("Raccourci de la bulle principale", _mainHotkey));
         _opacity = MakeSlider(30, 100, _s.DefaultOpacity);
-        root.Children.Add(Row("OpacitÃ© par dÃ©faut des fenÃªtres", SliderWithValue(_opacity, "%")));
+        root.Children.Add(Row("Opacité par défaut des fenêtres", SliderWithValue(_opacity, "%")));
         _width = MakeSlider(20, 90, _s.DefaultWidthPct);
-        root.Children.Add(Row("Largeur par dÃ©faut (% de l'Ã©cran)", SliderWithValue(_width, "%")));
+        root.Children.Add(Row("Largeur par défaut (% de l'écran)", SliderWithValue(_width, "%")));
         _height = MakeSlider(20, 95, _s.DefaultHeightPct);
-        root.Children.Add(Row("Hauteur par dÃ©faut (% de l'Ã©cran)", SliderWithValue(_height, "%")));
-        _autoHide = new CheckBox { Content = "Cacher la fenÃªtre quand je clique ailleurs (ex. retour au jeu)", IsChecked = _s.AutoHide, Margin = new Thickness(0, 8, 0, 0) };
+        root.Children.Add(Row("Hauteur par défaut (% de l'écran)", SliderWithValue(_height, "%")));
+        _autoHide = new CheckBox { Content = "Cacher la fenêtre quand je clique ailleurs (ex. retour au jeu)", IsChecked = _s.AutoHide, Margin = new Thickness(0, 8, 0, 0) };
         root.Children.Add(_autoHide);
         _screen = new ComboBox { Width = 260 };
         var screens = System.Windows.Forms.Screen.AllScreens;
@@ -94,12 +94,12 @@ public sealed class SettingsWindow : Window
             _screen.Items.Add(new ComboBoxItem { Content = Screens.Label(screens[i], i), Tag = screens[i].DeviceName });
             if (screens[i].DeviceName == currentScreen) _screen.SelectedIndex = i;
         }
-        root.Children.Add(Row("Ã‰cran des bulles", _screen));
-        _startup = new CheckBox { Content = "Lancer Bulles au dÃ©marrage de Windows", IsChecked = _s.StartWithWindows, Margin = new Thickness(0, 8, 0, 0) };
+        root.Children.Add(Row("Écran des bulles", _screen));
+        _startup = new CheckBox { Content = "Lancer Bulles au démarrage de Windows", IsChecked = _s.StartWithWindows, Margin = new Thickness(0, 8, 0, 0) };
         root.Children.Add(_startup);
         root.Children.Add(new TextBlock
         {
-            Text = "Astuce : glisse la bulle principale pour la dÃ©placer, ou vers l'autre moitiÃ© de l'Ã©cran pour changer de cÃ´tÃ©.",
+            Text = "Astuce : glisse la bulle principale pour la déplacer, ou vers l'autre moitié de l'écran pour changer de côté.",
             Foreground = Brushes.Gray,
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 10, 0, 0),
@@ -112,7 +112,7 @@ public sealed class SettingsWindow : Window
         var list = new StackPanel();
         if (_s.Bubbles.Count == 0)
         {
-            list.Children.Add(new TextBlock { Text = "Aucune bulle pour l'instant. Ajoute une app avec la bulle Â« + Â».", Foreground = Brushes.Gray });
+            list.Children.Add(new TextBlock { Text = "Aucune bulle pour l'instant. Ajoute une app avec la bulle « + ».", Foreground = Brushes.Gray });
         }
         for (int i = 0; i < _s.Bubbles.Count; i++)
         {
@@ -136,7 +136,7 @@ public sealed class SettingsWindow : Window
             row.Children.Add(opHost);
             DockPanel.SetDock(box, Dock.Right);
             row.Children.Add(box);
-            row.Children.Add(new TextBlock { Text = $"Bulle {i + 1} Â· {b.Name}", VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis });
+            row.Children.Add(new TextBlock { Text = $"Bulle {i + 1} · {b.Name}", VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis });
             list.Children.Add(row);
         }
         root.Children.Add(list);
@@ -160,7 +160,7 @@ public sealed class SettingsWindow : Window
 
         Content = new ScrollViewer { Content = root, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
 
-        // EmpÃªche Alt+Espace d'ouvrir le menu systÃ¨me pendant qu'on le capture dans un champ.
+        // Empêche Alt+Espace d'ouvrir le menu système pendant qu'on le capture dans un champ.
         SourceInitialized += (_, _) => HwndSource.FromHwnd(new WindowInteropHelper(this).Handle)!.AddHook(
             (IntPtr h, int msg, IntPtr w, IntPtr l, ref bool handled) =>
             {

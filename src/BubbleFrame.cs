@@ -63,6 +63,9 @@ public sealed class BubbleFrame : Window
         AllowsTransparency = true;
         Background = Brushes.Transparent;
         Opacity = 0;
+        // Tout aligné sur les pixels de l'écran : sans ça, la page web est dessinée « entre deux pixels » et paraît floue.
+        UseLayoutRounding = true;
+        SnapsToDevicePixels = true;
         MinWidth = DefaultMinWidth;
         MinHeight = DefaultMinHeight;
         WindowChrome.SetWindowChrome(this, new WindowChrome
@@ -100,7 +103,7 @@ public sealed class BubbleFrame : Window
             CornerRadius = new CornerRadius(FrameRadius),
             Background = FrameBg,
             BorderBrush = new SolidColorBrush(Color.FromArgb(0xCC, LauncherWindow.Accent.R, LauncherWindow.Accent.G, LauncherWindow.Accent.B)),
-            BorderThickness = new Thickness(1.5),
+            BorderThickness = new Thickness(2),
             Child = root,
         };
 
@@ -321,7 +324,8 @@ public sealed class BubbleFrame : Window
     public async Task InitWebAsync(CoreWebView2Environment env)
     {
         if (_web != null) return;
-        _web = new WebView2CompositionControl { DefaultBackgroundColor = System.Drawing.Color.FromArgb(0x12, 0x15, 0x1C) };
+        _web = new WebView2CompositionControl { DefaultBackgroundColor = System.Drawing.Color.FromArgb(0x12, 0x15, 0x1C), UseLayoutRounding = true };
+        RenderOptions.SetBitmapScalingMode(_web, BitmapScalingMode.NearestNeighbor);
         _host.Child = _web;
         await _web.EnsureCoreWebView2Async(env);
         var core = _web.CoreWebView2;

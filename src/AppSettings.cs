@@ -39,7 +39,7 @@ public class AppSettings
     /// <summary>Position verticale de la bulle principale, en fraction de la hauteur d'écran.</summary>
     public double MainY { get; set; } = 0.2;
 
-    public int DefaultOpacity { get; set; } = 95;
+    public int DefaultOpacity { get; set; } = 100;
     public int DefaultWidthPct { get; set; } = 45;
     public int DefaultHeightPct { get; set; } = 65;
     public bool AutoHide { get; set; }
