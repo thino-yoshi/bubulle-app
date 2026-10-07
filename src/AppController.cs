@@ -134,12 +134,23 @@ public sealed class AppController : IDisposable
 
     private async Task ShowWeb(BubbleConfig bubble)
     {
-        var frame = GetFrame(bubble);
+        var frame = await GetReadyFrame(bubble);
         frame.Show();
         Activate(frame);
+        var fade = frame.FadeInAsync();
         // La page reste chargée quand la bulle est cachée (Discord reste connecté, le vocal continue).
         await frame.InitWebAsync(await WebEnvironment());
+        await fade;
         frame.FocusContent();
+    }
+
+    /// <summary>Cadre prêt à apparaître en fondu (attend la fin d'un éventuel fondu de fermeture).</summary>
+    private async Task<BubbleFrame> GetReadyFrame(BubbleConfig bubble)
+    {
+        if (_frames.TryGetValue(bubble, out var existing)) await existing.HideTask;
+        var frame = GetFrame(bubble);
+        frame.PrepareShow();
+        return frame;
     }
 
     private async Task ShowApp(BubbleConfig bubble)
@@ -159,11 +170,14 @@ public sealed class AppController : IDisposable
         if (!_launcher.IsOpen) return;
         _lastHwnd[bubble] = hwnd;
 
-        var frame = GetFrame(bubble);
+        var frame = await GetReadyFrame(bubble);
         frame.Show();
         Activate(frame);
-        frame.AttachNative(hwnd);
+        bool mustRepaint = frame.AttachNative(hwnd);
         frame.FocusContent();
+        // Laisse l'app se redessiner à sa nouvelle taille, encore invisible, avant le fondu.
+        await Task.Delay(mustRepaint ? 320 : 90);
+        await frame.FadeInAsync();
     }
 
     private void Activate(BubbleFrame frame)
@@ -225,7 +239,7 @@ public sealed class AppController : IDisposable
         else frame.Hide();
     }
 
-    private void HideCurrent(bool restoreFocus)
+    private void HideCurrent(bool restoreFocus, bool animate = true)
     {
         var frame = _current;
         if (frame == null) return;
@@ -242,8 +256,15 @@ public sealed class AppController : IDisposable
         b.Opacity = frame.OpacityPercent == Settings.DefaultOpacity ? 0 : frame.OpacityPercent;
         Settings.Save();
 
-        frame.DetachNative(minimize: true);
-        frame.Hide();
+        if (animate)
+        {
+            _ = frame.HideAnimatedAsync();
+        }
+        else
+        {
+            frame.DetachNative(minimize: true);
+            frame.Hide();
+        }
 
         var focus = _returnFocus;
         if (restoreFocus && focus != IntPtr.Zero && Native.IsWindow(focus) && !Native.IsIconic(focus))
@@ -320,7 +341,7 @@ public sealed class AppController : IDisposable
 
     public void RemoveBubble(BubbleConfig bubble)
     {
-        if (_current?.Bubble == bubble) HideCurrent(restoreFocus: true);
+        if (_current?.Bubble == bubble) HideCurrent(restoreFocus: true, animate: false);
         if (_frames.Remove(bubble, out var frame))
         {
             frame.DisposeContent();
@@ -450,7 +471,7 @@ public sealed class AppController : IDisposable
         if (_disposed) return;
         _disposed = true;
         // Rend toujours les fenêtres empruntées dans leur état d'origine.
-        HideCurrent(restoreFocus: false);
+        HideCurrent(restoreFocus: false, animate: false);
         foreach (var frame in _frames.Values) frame.DisposeContent();
         _hotkeys.Dispose();
         Native.UnhookWinEvent(_foregroundHook);

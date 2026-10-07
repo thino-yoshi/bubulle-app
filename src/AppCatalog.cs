@@ -203,6 +203,11 @@ public static class IconLoader
             await File.WriteAllBytesAsync(file, bytes);
             return file;
         }
+        catch (System.Net.Http.HttpRequestException)
+        {
+            // Site sans icône connue : la bulle affichera sa première lettre.
+            return "";
+        }
         catch (Exception ex)
         {
             App.Log(ex);

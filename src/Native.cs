@@ -23,7 +23,7 @@ internal static class Native
     public const int WM_HOTKEY = 0x312, WM_SYSCOMMAND = 0x112, SC_KEYMENU = 0xF100;
     public const uint MOD_ALT = 0x1, MOD_CONTROL = 0x2, MOD_SHIFT = 0x4, MOD_WIN = 0x8, MOD_NOREPEAT = 0x4000;
 
-    public const int DWMWA_CLOAKED = 14, DWMWA_WINDOW_CORNER_PREFERENCE = 33, DWMWA_BORDER_COLOR = 34;
+    public const int DWMWA_TRANSITIONS_FORCEDISABLED = 3, DWMWA_CLOAKED = 14, DWMWA_WINDOW_CORNER_PREFERENCE = 33, DWMWA_BORDER_COLOR = 34;
     public const int DWMWCP_DEFAULT = 0, DWMWCP_ROUND = 2;
 
     public const uint EVENT_SYSTEM_FOREGROUND = 3, WINEVENT_OUTOFCONTEXT = 0;
@@ -97,6 +97,13 @@ internal static class Native
     public static void SetExStyle(IntPtr h, long style) => SetWindowLongPtr(h, GWL_EXSTYLE, new IntPtr(style));
     public static long GetStyle(IntPtr h) => GetWindowLongPtr(h, GWL_STYLE).ToInt64();
     public static void SetStyle(IntPtr h, long style) => SetWindowLongPtr(h, GWL_STYLE, new IntPtr(style));
+
+    /// <summary>Coupe (ou remet) les animations Windows d'ouverture/réduction d'une fenêtre.</summary>
+    public static void SetTransitionsDisabled(IntPtr h, bool disabled)
+    {
+        int value = disabled ? 1 : 0;
+        DwmSetWindowAttribute(h, DWMWA_TRANSITIONS_FORCEDISABLED, ref value, sizeof(int));
+    }
 
     /// <summary>Applique une opacité globale (0-100 %) à une fenêtre, ou la retire à 100 %.</summary>
     public static void SetOpacity(IntPtr h, int percent, long baseExStyle)

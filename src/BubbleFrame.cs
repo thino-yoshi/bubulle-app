@@ -21,7 +21,7 @@ namespace Bulles;
 /// </summary>
 public sealed class BubbleFrame : Window
 {
-    private const double HeaderHeight = 38, Inset = 4;
+    private const double HeaderHeight = 38, Inset = 5, FrameRadius = 16, ContentRadius = 11;
 
     private static readonly Brush FrameBg = Frozen(new SolidColorBrush(Color.FromRgb(0x12, 0x15, 0x1C)));
     private static readonly Brush HeaderFg = Frozen(new SolidColorBrush(Color.FromArgb(0xDD, 0xFF, 0xFF, 0xFF)));
@@ -32,9 +32,8 @@ public sealed class BubbleFrame : Window
     private readonly Slider _opacity;
     private readonly ToggleButton _pin;
     private readonly DispatcherTimer _sync;
-    private WebView2? _web;
+    private WebView2CompositionControl? _web;
     private TextBox? _address;
-    private long _frameExStyle;
     private int _opacityPercent = 100;
 
     // État d'origine de la fenêtre Windows qu'on a mise dans le cadre.
@@ -58,7 +57,11 @@ public sealed class BubbleFrame : Window
         ShowInTaskbar = false;
         Topmost = true;
         ShowActivated = true;
-        Background = FrameBg;
+        // Fenêtre transparente : la bulle (coins arrondis, bord lumineux) est dessinée par WPF,
+        // et le fondu passe par Opacity, que WPF gère proprement.
+        AllowsTransparency = true;
+        Background = Brushes.Transparent;
+        Opacity = 0;
         MinWidth = 300;
         MinHeight = 220;
         WindowChrome.SetWindowChrome(this, new WindowChrome
@@ -70,7 +73,10 @@ public sealed class BubbleFrame : Window
             UseAeroCaptionButtons = false,
         });
 
-        _host = new Border { Margin = new Thickness(Inset, 0, Inset, Inset), Background = Brushes.Black };
+        _host = new Border { Margin = new Thickness(Inset, 0, Inset, Inset), Background = FrameBg };
+        // Arrondit aussi le contenu (page web) dans le bas de la bulle.
+        _host.SizeChanged += (_, _) => _host.Clip = new RectangleGeometry(
+            new Rect(0, 0, _host.ActualWidth, _host.ActualHeight), ContentRadius, ContentRadius);
         _opacity = new Slider
         {
             Minimum = 30, Maximum = 100, Value = opacity, Width = 80,
@@ -88,7 +94,14 @@ public sealed class BubbleFrame : Window
         Grid.SetRow(_host, 1);
         root.Children.Add(header);
         root.Children.Add(_host);
-        Content = root;
+        Content = new Border
+        {
+            CornerRadius = new CornerRadius(FrameRadius),
+            Background = FrameBg,
+            BorderBrush = new SolidColorBrush(Color.FromArgb(0xCC, LauncherWindow.Accent.R, LauncherWindow.Accent.G, LauncherWindow.Accent.B)),
+            BorderThickness = new Thickness(1.5),
+            Child = root,
+        };
 
         _opacity.ValueChanged += (_, _) => ApplyOpacity((int)_opacity.Value);
         _sync = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
@@ -98,13 +111,7 @@ public sealed class BubbleFrame : Window
         {
             var h = Hwnd;
             Native.SetExStyle(h, Native.GetExStyle(h) | Native.WS_EX_TOOLWINDOW);
-            _frameExStyle = Native.GetExStyle(h);
-            int corner = Native.DWMWCP_ROUND;
-            Native.DwmSetWindowAttribute(h, Native.DWMWA_WINDOW_CORNER_PREFERENCE, ref corner, sizeof(int));
-            var a = LauncherWindow.Accent;
-            int border = a.R | (a.G << 8) | (a.B << 16);
-            Native.DwmSetWindowAttribute(h, Native.DWMWA_BORDER_COLOR, ref border, sizeof(int));
-            ApplyOpacity((int)_opacity.Value);
+            _opacityPercent = (int)_opacity.Value;
         };
         LocationChanged += (_, _) => SyncNative();
         SizeChanged += (_, _) => SyncNative();
@@ -112,6 +119,73 @@ public sealed class BubbleFrame : Window
     }
 
     public int OpacityPercent => _opacityPercent;
+
+    /// <summary>Fondu de fermeture en cours (à attendre avant de rouvrir la même bulle).</summary>
+    public Task HideTask { get; private set; } = Task.CompletedTask;
+
+    private byte _alpha;
+    private byte TargetAlpha => (byte)(_opacityPercent * 255 / 100);
+
+    // ---------- Apparition / disparition ----------
+
+    /// <summary>À appeler avant Show() : le cadre (et la fenêtre qu'il contiendra) partent invisibles.</summary>
+    public void PrepareShow()
+    {
+        _alpha = 0;
+        Opacity = 0;
+    }
+
+    public async Task FadeInAsync()
+    {
+        await Fade(TargetAlpha, 170);
+        ApplyOpacity(_opacityPercent);
+    }
+
+    /// <summary>Fondu de sortie, puis rend la fenêtre de l'app (réduite) et cache le cadre.</summary>
+    public Task HideAnimatedAsync()
+    {
+        HideTask = Run();
+        return HideTask;
+
+        async Task Run()
+        {
+            await Fade(0, 130);
+            var released = DetachNative(minimize: true, restoreLook: false);
+            Hide();
+            // L'app termine sa réduction de son côté : on attend qu'elle soit vraiment rangée
+            // avant de lui rendre son opacité, sinon elle clignote en noir à l'écran.
+            for (int i = 0; i < 20 && released != IntPtr.Zero && !Native.IsIconic(released); i++) await Task.Delay(15);
+            await Task.Delay(150);
+            RestoreLook(released);
+        }
+    }
+
+    private async Task Fade(byte to, int durationMs)
+    {
+        byte from = _alpha;
+        var clock = Stopwatch.StartNew();
+        while (true)
+        {
+            double t = Math.Min(1, clock.ElapsedMilliseconds / (double)durationMs);
+            double eased = 1 - Math.Pow(1 - t, 3);
+            SetAlphaBoth((byte)Math.Round(from + (to - from) * eased));
+            if (t >= 1) return;
+            await Task.Delay(10);
+        }
+    }
+
+    private void SetAlphaBoth(byte alpha)
+    {
+        _alpha = alpha;
+        Opacity = alpha / 255.0;
+        if (_native != IntPtr.Zero) SetAlpha(_native, alpha);
+    }
+
+    private static void SetAlpha(IntPtr h, byte alpha)
+    {
+        Native.SetExStyle(h, Native.GetExStyle(h) | Native.WS_EX_LAYERED);
+        Native.SetLayeredWindowAttributes(h, 0, alpha, Native.LWA_ALPHA);
+    }
 
     private FrameworkElement BuildHeader()
     {
@@ -188,7 +262,7 @@ public sealed class BubbleFrame : Window
     public async Task InitWebAsync(CoreWebView2Environment env)
     {
         if (_web != null) return;
-        _web = new WebView2 { DefaultBackgroundColor = System.Drawing.Color.FromArgb(0x12, 0x15, 0x1C) };
+        _web = new WebView2CompositionControl { DefaultBackgroundColor = System.Drawing.Color.FromArgb(0x12, 0x15, 0x1C) };
         _host.Child = _web;
         await _web.EnsureCoreWebView2Async(env);
         var core = _web.CoreWebView2;
@@ -220,9 +294,10 @@ public sealed class BubbleFrame : Window
 
     // ---------- Contenu app Windows ----------
 
-    public void AttachNative(IntPtr hwnd)
+    /// <summary>Met la fenêtre dans le cadre. Retourne true si elle était réduite ou agrandie (elle doit se redessiner).</summary>
+    public bool AttachNative(IntPtr hwnd)
     {
-        if (_native == hwnd) { SyncNative(); return; }
+        if (_native == hwnd) { SyncNative(); return false; }
         DetachNative(minimize: false);
         _native = hwnd;
         _nativePlacement = new Native.WINDOWPLACEMENT { length = Marshal.SizeOf<Native.WINDOWPLACEMENT>() };
@@ -231,8 +306,14 @@ public sealed class BubbleFrame : Window
         _nativeExStyle = Native.GetExStyle(hwnd);
         _nativeOwner = Native.GetWindowLongPtr(hwnd, Native.GWLP_HWNDPARENT);
 
+        // Tout se passe dans l'invisible : pas d'animation Windows, fenêtre transparente
+        // pendant qu'on la restaure et qu'on la place dans le cadre. Le fondu la fera apparaître.
+        Native.SetTransitionsDisabled(hwnd, true);
+        SetAlpha(hwnd, _alpha);
+
         // Une fenêtre réduite ou agrandie ignore les déplacements : on la repasse en état normal.
         // Réduite → restaurer peut d'abord la ramener agrandie (Chrome), d'où plusieurs passes.
+        bool wasHidden = Native.IsIconic(hwnd) || Native.IsZoomed(hwnd);
         for (int i = 0; i < 3 && (Native.IsIconic(hwnd) || Native.IsZoomed(hwnd)); i++)
             Native.ShowWindow(hwnd, Native.SW_RESTORE);
 
@@ -246,36 +327,52 @@ public sealed class BubbleFrame : Window
         Native.DwmSetWindowAttribute(hwnd, Native.DWMWA_WINDOW_CORNER_PREFERENCE, ref corner, sizeof(int));
 
         SyncNative();
-        Native.SetOpacity(hwnd, _opacityPercent, _nativeExStyle);
         _sync.Start();
+        return wasHidden;
     }
 
-    public void DetachNative(bool minimize)
+    /// <summary>Rend la fenêtre de l'app. Retourne son handle si son opacité reste à rendre (restoreLook: false).</summary>
+    public IntPtr DetachNative(bool minimize, bool restoreLook = true)
     {
         _sync.Stop();
         var h = _native;
-        if (h == IntPtr.Zero) return;
+        if (h == IntPtr.Zero) return IntPtr.Zero;
         _native = IntPtr.Zero;
-        if (!Native.IsWindow(h)) return;
+        if (!Native.IsWindow(h)) return IntPtr.Zero;
 
         Native.SetWindowLongPtr(h, Native.GWLP_HWNDPARENT, _nativeOwner);
         // On rend les styles d'origine SAUF les bits d'état réduit/agrandi : recopier « réduit » sur une
         // fenêtre affichée la laisse en fantôme gris à l'écran. L'état est rendu par SetWindowPlacement.
         const long stateBits = Native.WS_MINIMIZE | Native.WS_MAXIMIZE;
         Native.SetStyle(h, (_nativeStyle & ~stateBits) | (Native.GetStyle(h) & stateBits));
-        Native.SetOpacity(h, 100, _nativeExStyle);
-        Native.SetExStyle(h, _nativeExStyle);
         int corner = Native.DWMWCP_DEFAULT;
         Native.DwmSetWindowAttribute(h, Native.DWMWA_WINDOW_CORNER_PREFERENCE, ref corner, sizeof(int));
         Native.SetWindowPos(h, Native.HWND_NOTOPMOST, 0, 0, 0, 0,
             Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE | Native.SWP_FRAMECHANGED);
 
         // Vraie réduction (avec son bouton dans la barre des tâches), puis remise de la position
-        // d'origine et de l'état agrandi pour quand tu la rouvriras.
+        // d'origine et de l'état agrandi pour quand tu la rouvriras. La fenêtre est encore
+        // transparente et sans animation : rien ne bouge à l'écran.
         if (minimize) Native.ShowWindow(h, Native.SW_SHOWMINNOACTIVE);
         var p = _nativePlacement;
         if (minimize) p.showCmd = Native.SW_SHOWMINNOACTIVE;
         Native.SetWindowPlacement(h, ref p);
+
+        _releasedExStyle = _nativeExStyle;
+        if (!restoreLook) return h;
+        RestoreLook(h);
+        return IntPtr.Zero;
+    }
+
+    private long _releasedExStyle;
+
+    /// <summary>Une fois rangée, la fenêtre retrouve son opacité et ses animations d'origine.</summary>
+    private void RestoreLook(IntPtr h)
+    {
+        if (h == IntPtr.Zero || !Native.IsWindow(h) || h == _native) return;
+        Native.SetOpacity(h, 100, _releasedExStyle);
+        Native.SetExStyle(h, _releasedExStyle);
+        Native.SetTransitionsDisabled(h, false);
     }
 
     private void SyncNative()
@@ -310,8 +407,9 @@ public sealed class BubbleFrame : Window
     private void ApplyOpacity(int percent)
     {
         _opacityPercent = percent;
+        _alpha = TargetAlpha;
         var h = Hwnd;
-        if (h != IntPtr.Zero) Native.SetOpacity(h, percent, _frameExStyle);
+        Opacity = percent / 100.0;
         if (_native != IntPtr.Zero) Native.SetOpacity(_native, percent, _nativeExStyle);
     }
 
