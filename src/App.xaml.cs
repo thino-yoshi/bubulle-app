@@ -7,6 +7,8 @@ namespace Bulles;
 
 public partial class App : Application
 {
+    public const string StartupArgument = "--startup";
+
     private Mutex? _mutex;
     private AppController? _controller;
 
@@ -17,7 +19,9 @@ public partial class App : Application
         _mutex = new Mutex(true, "Bulles.SingleInstance", out bool first);
         if (!first)
         {
-            MessageBox.Show("Bulles est déjà lancé (icône près de l'horloge).", "Bulles");
+            // Lancé automatiquement alors que Bulles tourne déjà : on s'arrête sans message.
+            if (Array.IndexOf(e.Args, StartupArgument) < 0)
+                MessageBox.Show("Bulles est déjà lancé (icône près de l'horloge).", "Bulles");
             Shutdown();
             return;
         }

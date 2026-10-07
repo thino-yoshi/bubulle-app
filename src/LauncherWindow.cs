@@ -61,6 +61,9 @@ public sealed class LauncherWindow : Window
             Native.SetExStyle(h, Native.GetExStyle(h) | Native.WS_EX_TOOLWINDOW);
         };
         DpiChanged += (_, _) => UpdatePlacement();
+        // Demande de fermeture externe (mise à jour, fermeture de session) : on quitte proprement
+        // pour rendre les fenêtres gardées dans les bulles.
+        Closing += (_, _) => _c.Quit();
     }
 
     private bool ExpandsDown => _mainY < Height / 2;

@@ -60,6 +60,9 @@ public sealed class AppController : IDisposable
         // Prépare la liste des apps en arrière-plan pour que la recherche soit instantanée.
         _ = AppCatalog.GetAsync();
         SearchWindow.WarmWebIcons();
+
+        // Remet à jour la tâche de démarrage (chemin de l'app, migration depuis l'ancienne clé Run).
+        if (Settings.StartWithWindows) ApplyStartup();
     }
 
     /// <summary>Un seul moteur web partagé : tes connexions (Discord, etc.) sont gardées entre les sessions.</summary>
@@ -433,18 +436,57 @@ public sealed class AppController : IDisposable
         _launcher.UpdatePlacement();
     }
 
+    /// <summary>
+    /// Lancement au démarrage via une tâche planifiée « à l'ouverture de session » : plus fiable que la clé
+    /// Run du registre, que Windows n'a pas exécutée chez toi. L'ancienne entrée Run est supprimée.
+    /// </summary>
     private void ApplyStartup()
     {
         try
         {
-            using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", writable: true);
-            if (key == null) return;
-            if (Settings.StartWithWindows) key.SetValue("Bulles", $"\"{Environment.ProcessPath}\"");
-            else key.DeleteValue("Bulles", throwOnMissingValue: false);
+            using var run = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", writable: true);
+            run?.DeleteValue("Bulles", throwOnMissingValue: false);
         }
         catch (Exception ex)
         {
             App.Log(ex);
+        }
+
+        try
+        {
+            dynamic service = Activator.CreateInstance(Type.GetTypeFromProgID("Schedule.Service")!)!;
+            service.Connect();
+            dynamic folder = service.GetFolder("\\");
+            if (!Settings.StartWithWindows)
+            {
+                try { folder.DeleteTask("Bulles", 0); }
+                catch { /* La tâche n'existait pas. */ }
+                return;
+            }
+
+            string user = $"{Environment.UserDomainName}\\{Environment.UserName}";
+            dynamic task = service.NewTask(0);
+            task.RegistrationInfo.Description = "Lance Bulles à l'ouverture de session";
+            task.Settings.DisallowStartIfOnBatteries = false;
+            task.Settings.StopIfGoingOnBatteries = false;
+            task.Settings.ExecutionTimeLimit = "PT0S";
+            task.Settings.MultipleInstances = 2; // Ignorer si déjà lancé.
+            dynamic trigger = task.Triggers.Create(9); // À l'ouverture de session.
+            trigger.UserId = user;
+            trigger.Delay = "PT5S";
+            dynamic action = task.Actions.Create(0);
+            action.Path = Environment.ProcessPath;
+            action.Arguments = App.StartupArgument;
+            action.WorkingDirectory = AppContext.BaseDirectory;
+            task.Principal.UserId = user;
+            task.Principal.LogonType = 3; // Session interactive, sans mot de passe.
+            task.Principal.RunLevel = 0; // Droits normaux.
+            folder.RegisterTaskDefinition("Bulles", task, 6, null, null, 3);
+        }
+        catch (Exception ex)
+        {
+            App.Log(ex);
+            Notify("Impossible de programmer le lancement au démarrage.");
         }
     }
 
@@ -507,6 +549,7 @@ public sealed class AppController : IDisposable
 
     public void Quit()
     {
+        if (_disposed) return;
         Dispose();
         Application.Current.Shutdown();
     }
