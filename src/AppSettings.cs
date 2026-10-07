@@ -33,6 +33,9 @@ public class AppSettings
     public bool PerBubbleHotkeys { get; set; }
     public string Side { get; set; } = "Right";
 
+    /// <summary>Nom système de l'écran des bulles (ex. \\.\DISPLAY2), vide = écran principal.</summary>
+    public string Screen { get; set; } = "";
+
     /// <summary>Position verticale de la bulle principale, en fraction de la hauteur d'écran.</summary>
     public double MainY { get; set; } = 0.2;
 

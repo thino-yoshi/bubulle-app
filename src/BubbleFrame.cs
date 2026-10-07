@@ -201,8 +201,22 @@ public sealed class BubbleFrame : Window
             Native.SetStyle(_native, Native.GetStyle(_native) & ~(Native.WS_CAPTION | Native.WS_THICKFRAME | Native.WS_MAXIMIZE));
         RaiseNative();
         SyncNative();
+        ForceRepaint();
         _sync.Start();
         return mustRepaint;
+    }
+
+    /// <summary>
+    /// Chrome met son affichage en pause quand sa fenêtre est cachée ou hors écran, et ne le reprend
+    /// pas toujours en revenant (contenu vide). Un redimensionnement d'un pixel le force à se redessiner.
+    /// </summary>
+    private async void ForceRepaint()
+    {
+        if (_native == IntPtr.Zero || !Native.GetWindowRect(_native, out var r)) return;
+        Native.SetWindowPos(_native, IntPtr.Zero, r.Left, r.Top, r.Width - 1, r.Height,
+            Native.SWP_NOZORDER | Native.SWP_NOACTIVATE);
+        await Task.Delay(50);
+        SyncNative();
     }
 
     private async Task Fade(byte to, int durationMs)
@@ -372,6 +386,7 @@ public sealed class BubbleFrame : Window
         Native.DwmSetWindowAttribute(hwnd, Native.DWMWA_WINDOW_CORNER_PREFERENCE, ref corner, sizeof(int));
 
         SyncNative();
+        ForceRepaint();
         _sync.Start();
         return wasHidden;
     }
@@ -466,7 +481,7 @@ public sealed class BubbleFrame : Window
         double height = ActualHeight + Math.Max(0, extraH) / dpi;
         // Bulle collée à droite de l'écran : elle grandit vers la gauche (bord droit fixe) pour rester visible.
         double right = Left + ActualWidth;
-        double left = _c.Settings.IsLeft ? Left : Math.Max(SystemParameters.WorkArea.Left, right - width);
+        double left = _c.Settings.IsLeft ? Left : Math.Max(Screens.WorkAreaDip(_c.Settings).Left, right - width);
 
         _enforcing = true;
         try

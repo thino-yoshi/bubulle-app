@@ -63,18 +63,16 @@ public sealed class LauncherWindow : Window
         DpiChanged += (_, _) => UpdatePlacement();
     }
 
-    private double Dpi => PresentationSource.FromVisual(this)?.CompositionTarget?.TransformToDevice.M11 ?? 1.0;
     private bool ExpandsDown => _mainY < Height / 2;
 
     private double TargetCenter(int index) => _mainY + (ExpandsDown ? 1 : -1) * (FirstOffset + index * Spacing);
 
     public void UpdatePlacement()
     {
-        var wa = Forms.Screen.PrimaryScreen!.WorkingArea;
-        double d = Dpi;
-        Height = wa.Height / d;
-        Top = wa.Top / d;
-        Left = _c.Settings.IsLeft ? wa.Left / d : wa.Right / d - StripWidth;
+        var wa = Screens.WorkAreaDip(_c.Settings);
+        Height = wa.Height;
+        Top = wa.Top;
+        Left = _c.Settings.IsLeft ? wa.Left : wa.Right - StripWidth;
         _mainY = ClampY(_c.Settings.MainY * Height);
         PlaceCenter(_main, _mainY);
         foreach (var el in AllItems()) Reset(el);
@@ -265,13 +263,15 @@ public sealed class LauncherWindow : Window
         _mainY = ClampY(p.Y);
         PlaceCenter(_main, _mainY);
 
-        // Glisser la bulle de l'autre côté de l'écran la colle au bord opposé.
-        var screenX = PointToScreen(p).X;
-        var wa = Forms.Screen.PrimaryScreen!.WorkingArea;
-        bool wantLeft = screenX < wa.Left + wa.Width / 2.0;
-        if (wantLeft != _c.Settings.IsLeft)
+        // Glisser la bulle vers l'autre moitié de l'écran (ou sur un autre écran) la colle au bord le plus proche.
+        var pt = PointToScreen(p);
+        var target = Forms.Screen.FromPoint(new System.Drawing.Point((int)pt.X, (int)pt.Y));
+        var wa = target.WorkingArea;
+        bool wantLeft = pt.X < wa.Left + wa.Width / 2.0;
+        if (wantLeft != _c.Settings.IsLeft || target.DeviceName != Screens.Current(_c.Settings).DeviceName)
         {
             _c.Settings.Side = wantLeft ? "Left" : "Right";
+            _c.Settings.Screen = target.DeviceName;
             _c.Settings.MainY = _mainY / Height;
             UpdatePlacement();
         }

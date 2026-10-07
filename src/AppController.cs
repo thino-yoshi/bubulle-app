@@ -167,7 +167,7 @@ public sealed class AppController : IDisposable
                 Activate(parked);
                 bool repaint = parked.Unpark();
                 parked.FocusContent();
-                await Task.Delay(repaint ? 320 : 40);
+                await Task.Delay(repaint ? 320 : 110);
                 await parked.FadeInAsync();
                 return;
             }
@@ -209,7 +209,7 @@ public sealed class AppController : IDisposable
     private void PlaceFrame(BubbleFrame frame)
     {
         var b = frame.Bubble;
-        var wa = SystemParameters.WorkArea;
+        var wa = Screens.WorkAreaDip(Settings);
         var (centerY, stripLeft, stripRight) = _launcher.AnchorDip(b);
         double maxWidth = wa.Width - LauncherWindow.StripWidth - 2 * FrameGap;
         double width = Math.Min(b.Width > 0 ? b.Width : wa.Width * Settings.DefaultWidthPct / 100, maxWidth);
@@ -412,6 +412,8 @@ public sealed class AppController : IDisposable
         _settingsWindow.Saved += () =>
         {
             if (Settings.StartWithWindows != startupBefore) ApplyStartup();
+            CloseLauncher();
+            _launcher.UpdatePlacement();
             _launcher.Rebuild();
         };
         _settingsWindow.Closed += (_, _) =>
@@ -421,6 +423,14 @@ public sealed class AppController : IDisposable
         };
         _settingsWindow.Show();
         _settingsWindow.Activate();
+    }
+
+    public void MoveToScreen(string deviceName)
+    {
+        CloseLauncher();
+        Settings.Screen = deviceName;
+        Settings.Save();
+        _launcher.UpdatePlacement();
     }
 
     private void ApplyStartup()
@@ -441,6 +451,22 @@ public sealed class AppController : IDisposable
     private Forms.NotifyIcon CreateTray()
     {
         var menu = new Forms.ContextMenuStrip();
+        var screens = new Forms.ToolStripMenuItem("Écran des bulles");
+        menu.Items.Add(screens);
+        // Liste reconstruite à chaque ouverture : un écran peut avoir été branché ou débranché.
+        menu.Opening += (_, _) =>
+        {
+            screens.DropDownItems.Clear();
+            var all = Forms.Screen.AllScreens;
+            var current = Screens.Current(Settings).DeviceName;
+            for (int i = 0; i < all.Length; i++)
+            {
+                var device = all[i].DeviceName;
+                var item = new Forms.ToolStripMenuItem(Screens.Label(all[i], i)) { Checked = device == current };
+                item.Click += (_, _) => MoveToScreen(device);
+                screens.DropDownItems.Add(item);
+            }
+        };
         menu.Items.Add("Paramètres", null, (_, _) => OpenSettings());
         menu.Items.Add("Quitter Bulles", null, (_, _) => Quit());
         var tray = new Forms.NotifyIcon
