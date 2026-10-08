@@ -344,7 +344,8 @@ public sealed class SettingsView : UserControl
     private FrameworkElement SoundRow(string label, Func<string> get, Action<string> set, string importName)
     {
         var file = new TextBlock { Foreground = TextSoft, FontSize = 12, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 130, Margin = new Thickness(0, 0, 10, 0) };
-        void Refresh() => file.Text = string.IsNullOrEmpty(get()) ? "Aucun" : Path.GetFileName(get());
+        void Refresh() => file.Text = string.IsNullOrEmpty(get()) ? "Aucun"
+            : string.Equals(get(), Sounds.BundledOpen, StringComparison.OrdinalIgnoreCase) ? "Son de base" : Path.GetFileName(get());
         Refresh();
 
         var choose = new Button { Content = "Choisir…", Style = Theme.Button };

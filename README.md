@@ -24,6 +24,10 @@ Windows 10 ou 11 (64 bits) est nécessaire. Rien d'autre à installer.
 
 Les bulles s'affichent par-dessus les jeux en mode **fenêtré sans bordure** (borderless). Le plein écran exclusif ne permet à aucune fenêtre de passer devant.
 
+## Crédits
+
+Le son de déploiement des bulles provient de l'anime *Sword Art Online* et appartient à ses ayants droit. Il est utilisé dans un projet gratuit et non commercial, et sera retiré sur simple demande. Chacun peut le remplacer dans Paramètres → Sons.
+
 ## Développement
 
 - Code : C# / .NET 8 / WPF (`src/`).

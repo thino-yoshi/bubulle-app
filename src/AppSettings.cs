@@ -89,6 +89,8 @@ public class AppSettings
     public bool SoundEnabled { get; set; } = true;
     public int SoundVolume { get; set; } = 70;
     public string OpenSoundPath { get; set; } = "";
+    /// <summary>Le son fourni avec l'app a été proposé une fois (on ne remplace jamais un choix déjà fait).</summary>
+    public bool DefaultSoundApplied { get; set; }
     public string CloseSoundPath { get; set; } = "";
 
     /// <summary>Charge les sites web en arrière-plan au démarrage (pastilles de notification).</summary>

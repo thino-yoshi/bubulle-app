@@ -12,9 +12,19 @@ public sealed class Sounds
 
     public static string Dir => Path.Combine(AppSettings.Dir, "sounds");
 
+    /// <summary>Son de déploiement fourni avec l'app (à côté de Bubulle.exe).</summary>
+    public static string BundledOpen => Path.Combine(AppContext.BaseDirectory, "sounds", "open.m4a");
+
     public Sounds(AppSettings settings)
     {
         _s = settings;
+        // Première fois : si aucun son n'a encore été choisi, on met celui fourni avec l'app.
+        if (!_s.DefaultSoundApplied)
+        {
+            if (_s.OpenSoundPath.Length == 0 && File.Exists(BundledOpen)) _s.OpenSoundPath = BundledOpen;
+            _s.DefaultSoundApplied = true;
+            _s.Save();
+        }
         Reload();
     }
 

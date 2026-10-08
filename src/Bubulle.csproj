@@ -10,7 +10,7 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AssemblyName>Bubulle</AssemblyName>
     <RootNamespace>Bulles</RootNamespace>
-    <Version>0.0.3</Version>
+    <Version>0.0.4</Version>
     <SatelliteResourceLanguages>fr;en</SatelliteResourceLanguages>
     <NoWarn>$(NoWarn);WFAC010</NoWarn>
   </PropertyGroup>
@@ -19,6 +19,11 @@
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.10" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31" />
     <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Son de déploiement par défaut, copié à côté de l'app (dossier sounds). -->
+    <None Include="Assets\sounds\open.m4a" Link="sounds\open.m4a" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
