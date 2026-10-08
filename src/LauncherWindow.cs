@@ -180,11 +180,18 @@ public sealed class LauncherWindow : Window
         };
     }
 
+    /// <summary>Valeur de pastille « point » : de l'activité, sans nombre connu (apps de bureau).</summary>
+    public const int DotBadge = -1;
+
     internal static void UpdateBadge(Border? badge, int count)
     {
         if (badge == null) return;
-        badge.Visibility = count > 0 ? Visibility.Visible : Visibility.Collapsed;
-        ((TextBlock)badge.Child).Text = count > 99 ? "99+" : count.ToString();
+        bool dot = count == DotBadge;
+        badge.Visibility = count > 0 || dot ? Visibility.Visible : Visibility.Collapsed;
+        ((TextBlock)badge.Child).Text = dot ? "" : count > 99 ? "99+" : count.ToString();
+        badge.MinWidth = dot ? 13 : 18;
+        badge.Height = dot ? 13 : 18;
+        badge.Padding = dot ? new Thickness(0) : new Thickness(4, 0, 4, 0);
     }
 
     public void SetActive(BubbleConfig? bubble)

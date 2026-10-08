@@ -94,6 +94,11 @@ internal static class Native
     [DllImport("user32.dll")] public static extern IntPtr SetWinEventHook(uint min, uint max, IntPtr hmod, WinEventProc proc, uint pid, uint tid, uint flags);
     [DllImport("user32.dll")] public static extern bool UnhookWinEvent(IntPtr hook);
     [DllImport("user32.dll")] public static extern bool DestroyIcon(IntPtr h);
+    [DllImport("user32.dll")] public static extern bool RegisterShellHookWindow(IntPtr h);
+    [DllImport("user32.dll")] public static extern bool DeregisterShellHookWindow(IntPtr h);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern uint RegisterWindowMessage(string name);
+    /// <summary>Message du shell « une fenêtre fait clignoter son bouton dans la barre des tâches ».</summary>
+    public const int HSHELL_FLASH = 0x8006;
     [DllImport("dwmapi.dll")] public static extern int DwmSetWindowAttribute(IntPtr h, int attr, ref int value, int size);
     [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr h, int attr, out int value, int size);
     [DllImport("kernel32.dll")] public static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);

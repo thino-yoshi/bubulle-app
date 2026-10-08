@@ -427,7 +427,21 @@ public sealed class BubbleFrame : Window
             _opacityBeforeClickThrough = 0;
         }
         ApplyClickThroughStyle();
+
+        // La bulle entière laisse passer la souris : une pastille à part reste cliquable pour reprendre la main.
+        if (on)
+        {
+            _handle = new ClickThroughHandle(this, () => _c.ToggleClickThrough(this));
+            _handle.Show();
+        }
+        else
+        {
+            _handle?.Close();
+            _handle = null;
+        }
     }
+
+    private ClickThroughHandle? _handle;
 
     private void ApplyClickThroughStyle()
     {

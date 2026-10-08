@@ -71,6 +71,12 @@ public sealed class AppController : IDisposable
 
         _badgeTimer.Tick += (_, _) => PollAppBadges();
         _badgeTimer.Start();
+
+        // Apps de bureau : Windows prévient quand une fenêtre fait clignoter son bouton (nouveau message).
+        var launcherHwnd = new WindowInteropHelper(_launcher).Handle;
+        _shellHookMessage = Native.RegisterWindowMessage("SHELLHOOK");
+        Native.RegisterShellHookWindow(launcherHwnd);
+        HwndSource.FromHwnd(launcherHwnd)!.AddHook(ShellHook);
         if (Settings.PreloadWeb) _ = PreloadWebBubbles();
     }
 
@@ -82,14 +88,51 @@ public sealed class AppController : IDisposable
     public void OnContentTitle(BubbleConfig bubble, string title)
     {
         var m = BadgePattern.Match(title ?? "");
-        SetBadge(bubble, m.Success && int.TryParse(m.Groups[1].Value, out var n) ? n : 0);
-    }
-
-    private void SetBadge(BubbleConfig bubble, int count)
-    {
+        int count = m.Success && int.TryParse(m.Groups[1].Value, out var n) ? n : 0;
         if (_badges.TryGetValue(bubble, out var old) && old == count) return;
         _badges[bubble] = count;
-        _launcher.SetBadge(bubble, count, _badges.Where(kv => Settings.Bubbles.Contains(kv.Key)).Sum(kv => kv.Value));
+        RefreshBadge(bubble);
+    }
+
+    /// <summary>Affiche le nombre de non-lus, sinon un point si l'app a signalé de l'activité ; le total va sur la bulle principale.</summary>
+    private void RefreshBadge(BubbleConfig bubble)
+    {
+        int count = _badges.GetValueOrDefault(bubble);
+        int shown = count > 0 ? count : _activity.Contains(bubble) ? LauncherWindow.DotBadge : 0;
+        int total = Settings.Bubbles.Sum(b => Math.Max(0, _badges.GetValueOrDefault(b)));
+        if (total == 0 && Settings.Bubbles.Any(_activity.Contains)) total = LauncherWindow.DotBadge;
+        _launcher.SetBadge(bubble, shown, total);
+    }
+
+    private readonly HashSet<BubbleConfig> _activity = new();
+    private readonly uint _shellHookMessage;
+
+    private IntPtr ShellHook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (msg == _shellHookMessage && wParam.ToInt32() == Native.HSHELL_FLASH) OnAppFlash(lParam);
+        return IntPtr.Zero;
+    }
+
+    /// <summary>Une app de bureau fait clignoter son bouton (Discord à un nouveau message) : point rouge sur sa bulle.</summary>
+    private void OnAppFlash(IntPtr window)
+    {
+        var bubble = AppBubbleOf(window);
+        if (bubble == null || _current?.Bubble == bubble) return;
+        if (_activity.Add(bubble)) RefreshBadge(bubble);
+    }
+
+    private void ClearActivity(BubbleConfig bubble)
+    {
+        if (_activity.Remove(bubble)) RefreshBadge(bubble);
+    }
+
+    private BubbleConfig? AppBubbleOf(IntPtr window)
+    {
+        if (window == IntPtr.Zero || Native.ProcessId(window) == _ourPid) return null;
+        var path = Native.ProcessPath(window);
+        if (path == null) return null;
+        var exe = Path.GetFileNameWithoutExtension(path);
+        return Settings.Bubbles.FirstOrDefault(b => b.Kind == "App" && b.ProcessName.Equals(exe, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>Apps Windows : même principe, avec le titre de leur fenêtre.</summary>
@@ -251,6 +294,7 @@ public sealed class AppController : IDisposable
         _launcher.SetLoading(bubble, true);
         try
         {
+            ClearActivity(bubble);
             if (bubble.IsWeb) await ShowWeb(bubble);
             else if (bubble.IsMixer) await ShowMixer(bubble);
             else await ShowApp(bubble);
@@ -459,6 +503,8 @@ public sealed class AppController : IDisposable
     private void OnForegroundChanged(IntPtr hook, uint ev, IntPtr hwnd, int idObject, int idChild, uint thread, uint time)
     {
         if (hwnd == IntPtr.Zero || Native.ProcessId(hwnd) == _ourPid) return;
+        // Tu regardes l'app : son point d'activité disparaît.
+        if (AppBubbleOf(hwnd) is { } viewed) ClearActivity(viewed);
         if (_current != null && hwnd == _current.NativeHwnd) return;
         if (_floating.Any(f => f.NativeHwnd == hwnd)) return;
         // Les fenêtres du moteur web (msedgewebview2) appartiennent à Bulles.
@@ -772,6 +818,8 @@ public sealed class AppController : IDisposable
         HideCurrent(restoreFocus: false, animate: false);
         foreach (var frame in _frames.Values) frame.DisposeContent();
         _hotkeys.Dispose();
+        _badgeTimer.Stop();
+        Native.DeregisterShellHookWindow(new WindowInteropHelper(_launcher).Handle);
         Native.UnhookWinEvent(_foregroundHook);
         SystemEvents.DisplaySettingsChanged -= OnDisplayChanged;
         _tray.Visible = false;
