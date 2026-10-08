@@ -97,6 +97,17 @@ public sealed class LauncherView : UserControl
         tile.MouseLeftButtonUp += (_, _) => EndHold(tile, app);
 
         var menu = new ContextMenu();
+        var rename = new MenuItem { Header = "Renommer" };
+        rename.Click += (_, _) =>
+        {
+            var dialog = new TextInputDialog("Renommer", "Nom affiché dans le lanceur", app.Name);
+            dialog.ShowDialog();
+            if (dialog.Result == null || dialog.Result == app.Name) return;
+            app.Name = dialog.Result;
+            _c.Settings.Save();
+            Refresh();
+        };
+        menu.Items.Add(rename);
         // Ranger l'app dans un autre lanceur.
         var others = _c.Settings.Bubbles.Where(b => b.IsLauncher && b != _launcher).ToList();
         if (others.Count > 0)

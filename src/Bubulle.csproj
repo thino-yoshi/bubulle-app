@@ -11,7 +11,7 @@
     <ApplicationIcon>Assets\bubulle.ico</ApplicationIcon>
     <AssemblyName>Bubulle</AssemblyName>
     <RootNamespace>Bulles</RootNamespace>
-    <Version>0.0.9</Version>
+    <Version>0.0.10</Version>
     <SatelliteResourceLanguages>fr;en</SatelliteResourceLanguages>
     <NoWarn>$(NoWarn);WFAC010</NoWarn>
   </PropertyGroup>
