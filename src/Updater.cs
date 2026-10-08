@@ -92,6 +92,9 @@ public static class Updater
     public static void FindPending()
     {
         if (!Directory.Exists(Root)) return;
+        // Téléchargement interrompu (app fermée en cours de route) : il sera refait.
+        foreach (var zip in Directory.GetFiles(Root, "*.zip"))
+            try { File.Delete(zip); } catch { /* En cours d'utilisation : au prochain lancement. */ }
         foreach (var dir in Directory.GetDirectories(Root))
         {
             if (Version.TryParse(Path.GetFileName(dir), out var v) && v > Current && File.Exists(Path.Combine(dir, "Bubulle.exe")))
