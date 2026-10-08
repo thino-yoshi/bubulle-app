@@ -327,6 +327,7 @@ public sealed class AppController : IDisposable
         _search.Picked += app =>
         {
             if (app.Kind == "Browse") _launcher.Dispatcher.BeginInvoke(BrowseForApp);
+            else if (app.Kind == "AddSite") _launcher.Dispatcher.BeginInvoke(AskForWebSite);
             else _ = AddBubble(app);
         };
         _search.Closed += (_, _) =>
@@ -361,6 +362,21 @@ public sealed class AppController : IDisposable
             return;
         }
         _ = AddBubble(app);
+    }
+
+    /// <summary>Ajoute ta propre page web (nom + adresse) comme bulle.</summary>
+    private void AskForWebSite()
+    {
+        var dialog = new WebSiteDialog();
+        dialog.ShowDialog();
+        var site = dialog.Result;
+        if (site == null) return;
+        if (IsAlreadyBubble(site))
+        {
+            Notify($"{site.Name} a déjà sa bulle.");
+            return;
+        }
+        _ = AddBubble(site);
     }
 
     private bool IsAlreadyBubble(AppEntry app) =>

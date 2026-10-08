@@ -196,6 +196,7 @@ public static class WebPresets
         Web("Messenger", "https://www.messenger.com"),
         Web("WhatsApp", "https://web.whatsapp.com"),
         Web("YouTube", "https://www.youtube.com"),
+        Web("YouTube Music", "https://music.youtube.com"),
         Web("Twitch", "https://www.twitch.tv"),
         Web("ChatGPT", "https://chatgpt.com"),
         Web("Claude", "https://claude.ai"),
