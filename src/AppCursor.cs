@@ -38,8 +38,12 @@ public static class AppCursor
         {
             try
             {
-                using var stream = File.OpenRead(s.CursorPath);
-                Current = new Cursor(stream);
+                Current = LoadScaled(s.CursorPath, s.CursorScale);
+                if (Current == null)
+                {
+                    using var stream = File.OpenRead(s.CursorPath);
+                    Current = new Cursor(stream);
+                }
             }
             catch (Exception ex)
             {
@@ -48,6 +52,53 @@ public static class AppCursor
         }
         // Mouse.OverrideCursor ne vaut que pour les fenêtres de Bulles : ailleurs, Windows garde son curseur.
         Mouse.OverrideCursor = Current;
+    }
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr LoadImage(IntPtr hinst, string name, uint type, int cx, int cy, uint load);
+    [DllImport("user32.dll")] private static extern bool DestroyCursor(IntPtr cursor);
+    private const uint IMAGE_CURSOR = 2, LR_LOADFROMFILE = 0x10;
+
+    private sealed class CursorHandle : Microsoft.Win32.SafeHandles.SafeHandleZeroOrMinusOneIsInvalid
+    {
+        public CursorHandle(IntPtr h) : base(true) => SetHandle(h);
+        protected override bool ReleaseHandle() => DestroyCursor(handle);
+    }
+
+    /// <summary>
+    /// Charge le curseur à la taille voulue : Windows redimensionne l'image et le point de clic suit.
+    /// Taille d'origine lue dans l'en-tête du fichier .cur (0 = 256 px).
+    /// </summary>
+    private static Cursor? LoadScaled(string path, int scalePercent)
+    {
+        int size = 32;
+        if (path.EndsWith(".cur", StringComparison.OrdinalIgnoreCase))
+        {
+            var header = new byte[8];
+            using (var f = File.OpenRead(path)) f.ReadExactly(header);
+            size = header[6] == 0 ? 256 : header[6];
+        }
+        int target = Math.Clamp(size * scalePercent / 100, 8, 256);
+        var h = LoadImage(IntPtr.Zero, path, IMAGE_CURSOR, target, target, LR_LOADFROMFILE);
+        return h == IntPtr.Zero ? null : System.Windows.Interop.CursorInteropHelper.Create(new CursorHandle(h));
+    }
+
+    /// <summary>Image du curseur (pour l'aperçu dans les paramètres), ou null.</summary>
+    public static System.Windows.Media.ImageSource? Preview(string path)
+    {
+        if (!File.Exists(path)) return null;
+        var h = LoadImage(IntPtr.Zero, path, IMAGE_CURSOR, 0, 0, LR_LOADFROMFILE);
+        if (h == IntPtr.Zero) return null;
+        try
+        {
+            var source = System.Windows.Interop.Imaging.CreateBitmapSourceFromHIcon(h, System.Windows.Int32Rect.Empty, System.Windows.Media.Imaging.BitmapSizeOptions.FromEmptyOptions());
+            source.Freeze();
+            return source;
+        }
+        finally
+        {
+            DestroyCursor(h);
+        }
     }
 
     /// <summary>Le contenu d'une page web garde le curseur normal (main sur les liens, barre de texte).</summary>

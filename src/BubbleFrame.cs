@@ -495,6 +495,14 @@ public sealed class BubbleFrame : Window
         return new TextBlock { Text = glyph, FontFamily = BubbleGlyphs.Font, FontSize = size * 0.9, Foreground = new SolidColorBrush(LauncherWindow.Accent) };
     }
 
+    // ---------- Paramètres ----------
+
+    public void InitSettings()
+    {
+        if (_host.Child is SettingsView) return;
+        _host.Child = new SettingsView(_c);
+    }
+
     // ---------- Lanceur ----------
 
     private LauncherView? _launcherView;

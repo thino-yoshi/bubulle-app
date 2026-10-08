@@ -84,9 +84,47 @@ public sealed class LauncherWindow : Window
         PlaceCenter(_main, _mainY);
         foreach (var el in AllItems()) Reset(el);
         if (IsOpen) Open();
+        if (_settings is { Visibility: Visibility.Visible }) PlaceCenter(_settings, SettingsCenter);
     }
 
     private double ClampY(double y) => Math.Clamp(y, MainSize / 2 + 8, Math.Max(MainSize / 2 + 8, Height - MainSize / 2 - 8));
+
+    // ---------- Bulle « Paramètres » (au-dessus de la bulle principale) ----------
+
+    private BubbleVisual? _settings;
+
+    /// <summary>Position de la bulle engrenage : de l'autre côté de la bulle principale que la cascade.</summary>
+    private double SettingsCenter =>
+        Math.Clamp(_mainY + (ExpandsDown ? -1 : 1) * FirstOffset, AppSize / 2 + 4, Height - AppSize / 2 - 4);
+
+    public void ShowSettingsBubble()
+    {
+        if (_settings == null)
+        {
+            _settings = new BubbleVisual(AppSize, null, "") { ToolTip = "Paramètres" };
+            _settings.MouseLeftButtonUp += (_, _) => _c.ToggleSettings();
+            _canvas.Children.Add(_settings);
+        }
+        _settings.SetActive(true);
+        _settings.Visibility = Visibility.Visible;
+        PlaceCenter(_settings, _mainY);
+        _settings.Opacity = 0;
+        Animate(_settings, SettingsCenter, 1, 0, new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.45 });
+    }
+
+    public void HideSettingsBubble()
+    {
+        if (_settings == null || _settings.Visibility != Visibility.Visible) return;
+        var s = _settings;
+        Animate(s, _mainY, 0, 0, new QuadraticEase { EasingMode = EasingMode.EaseIn }, () =>
+        {
+            if (_c.CurrentIsSettings) return;
+            s.Visibility = Visibility.Hidden;
+        });
+    }
+
+    /// <summary>Centre de la bulle engrenage et bords de la bande, pour placer la fenêtre des paramètres.</summary>
+    public (double CenterY, double StripLeft, double StripRight) SettingsAnchorDip() => (Top + SettingsCenter, Left, Left + StripWidth);
 
     // ---------- Réorganiser les bulles (appui long puis glisser) ----------
 

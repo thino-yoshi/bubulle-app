@@ -6,7 +6,71 @@ namespace Bulles;
 /// <summary>Styles partagés de Bulles (curseurs fins, rangées de boutons) pour un rendu homogène.</summary>
 public static class Theme
 {
-    private static Style? _slider;
+    private static Style? _slider, _toggle, _button, _accentButton;
+
+    /// <summary>Interrupteur arrondi (à la place des cases à cocher).</summary>
+    public static Style Toggle => _toggle ??= (Style)XamlReader.Parse("""
+        <Style xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+               xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+               TargetType="CheckBox">
+          <Setter Property="Cursor" Value="Hand"/>
+          <Setter Property="Focusable" Value="False"/>
+          <Setter Property="Template">
+            <Setter.Value>
+              <ControlTemplate TargetType="CheckBox">
+                <Border x:Name="track" Width="40" Height="22" CornerRadius="11" Background="#33FFFFFF">
+                  <Ellipse x:Name="knob" Width="16" Height="16" Fill="White" HorizontalAlignment="Left" Margin="3,0,0,0"/>
+                </Border>
+                <ControlTemplate.Triggers>
+                  <Trigger Property="IsChecked" Value="True">
+                    <Setter TargetName="track" Property="Background" Value="#3DA5FF"/>
+                    <Setter TargetName="knob" Property="HorizontalAlignment" Value="Right"/>
+                    <Setter TargetName="knob" Property="Margin" Value="0,0,3,0"/>
+                  </Trigger>
+                  <Trigger Property="IsMouseOver" Value="True">
+                    <Setter TargetName="track" Property="Opacity" Value="0.9"/>
+                  </Trigger>
+                </ControlTemplate.Triggers>
+              </ControlTemplate>
+            </Setter.Value>
+          </Setter>
+        </Style>
+        """);
+
+    /// <summary>Bouton sombre arrondi.</summary>
+    public static Style Button => _button ??= ButtonStyle("#22FFFFFF", "#38FFFFFF");
+
+    /// <summary>Bouton bleu (action principale).</summary>
+    public static Style AccentButton => _accentButton ??= ButtonStyle("#3DA5FF", "#5BB4FF");
+
+    private static Style ButtonStyle(string background, string hover) => (Style)XamlReader.Parse($"""
+        <Style xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+               xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+               TargetType="Button">
+          <Setter Property="Foreground" Value="White"/>
+          <Setter Property="FontSize" Value="12.5"/>
+          <Setter Property="Cursor" Value="Hand"/>
+          <Setter Property="Focusable" Value="False"/>
+          <Setter Property="Padding" Value="12,6"/>
+          <Setter Property="Template">
+            <Setter.Value>
+              <ControlTemplate TargetType="Button">
+                <Border x:Name="bg" CornerRadius="8" Background="{background}" Padding="{"{"}TemplateBinding Padding{"}"}">
+                  <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+                <ControlTemplate.Triggers>
+                  <Trigger Property="IsMouseOver" Value="True">
+                    <Setter TargetName="bg" Property="Background" Value="{hover}"/>
+                  </Trigger>
+                  <Trigger Property="IsEnabled" Value="False">
+                    <Setter TargetName="bg" Property="Opacity" Value="0.5"/>
+                  </Trigger>
+                </ControlTemplate.Triggers>
+              </ControlTemplate>
+            </Setter.Value>
+          </Setter>
+        </Style>
+        """);
 
     /// <summary>Curseur fin : piste sombre arrondie, partie remplie à la couleur de Bulles, pastille blanche.</summary>
     public static Style Slider => _slider ??= (Style)XamlReader.Parse("""

@@ -36,7 +36,6 @@ public sealed class AppController : IDisposable
     private bool _clickThroughTipShown;
     private IntPtr _returnFocus;
     private SearchWindow? _search;
-    private SettingsWindow? _settingsWindow;
     private DateTime _searchClosedAt;
     private IntPtr _lastExternalForeground;
     private Task<CoreWebView2Environment>? _webEnv;
@@ -547,7 +546,7 @@ public sealed class AppController : IDisposable
     {
         var b = frame.Bubble;
         var wa = Screens.WorkAreaDip(Settings);
-        var (centerY, stripLeft, stripRight) = _launcher.AnchorDip(b);
+        var (centerY, stripLeft, stripRight) = b == SettingsBubble ? _launcher.SettingsAnchorDip() : _launcher.AnchorDip(b);
         double maxWidth = wa.Width - LauncherWindow.StripWidth - 2 * FrameGap;
         double width = Math.Min(b.Width > 0 ? b.Width : wa.Width * Settings.DefaultWidthPct / 100, maxWidth);
         double height = Math.Min(b.Height > 0 ? b.Height : wa.Height * Settings.DefaultHeightPct / 100, wa.Height - 2 * FrameGap);
@@ -610,6 +609,7 @@ public sealed class AppController : IDisposable
         if (frame == null) return;
         _current = null;
         _launcher.SetActive(null);
+        if (frame.Bubble == SettingsBubble) _launcher.HideSettingsBubble();
 
         // Mémorise la taille et l'opacité réglées pour cette bulle.
         var b = frame.Bubble;
@@ -826,41 +826,54 @@ public sealed class AppController : IDisposable
             Notify("Raccourci déjà utilisé par une autre app : " + string.Join(", ", failed) + ". Change-le dans les paramètres.");
     }
 
-    public void OpenSettings()
+    /// <summary>Bulle « Paramètres » : ne fait pas partie de ta liste, elle se déploie au-dessus de la bulle principale.</summary>
+    public BubbleConfig SettingsBubble { get; } = new() { Kind = "Settings", Name = "Paramètres", Glyph = "", Width = 560, Height = 760 };
+
+    public async void OpenSettings()
     {
-        if (_settingsWindow != null)
+        if (_busy) return;
+        _search?.SafeClose();
+        if (_current?.Bubble == SettingsBubble)
         {
-            _settingsWindow.Activate();
+            _current.Activate();
             return;
         }
-        // Coupe les raccourcis globaux pour pouvoir les saisir dans les champs.
-        _hotkeys.UnregisterAll();
-        bool startupBefore = Settings.StartWithWindows;
-        _settingsWindow = new SettingsWindow(Settings);
-        _settingsWindow.Saved += () =>
-        {
-            if (Settings.StartWithWindows != startupBefore) ApplyStartup();
-            Sounds.Reload();
-            AppCursor.Apply(Settings);
-            CloseLauncher();
-            _launcher.UpdatePlacement();
-            _launcher.Rebuild();
-        };
-        _settingsWindow.Closed += (_, _) =>
-        {
-            _settingsWindow = null;
-            RegisterHotkeys();
-        };
-        _settingsWindow.Show();
-        _settingsWindow.Activate();
+        var returnFocus = _current != null ? _returnFocus : _lastExternalForeground;
+        HideCurrent(restoreFocus: false);
+        _launcher.ShowSettingsBubble();
+
+        var frame = await GetReadyFrame(SettingsBubble);
+        frame.InitSettings();
+        frame.Show();
+        Activate(frame);
+        _returnFocus = returnFocus;
+        await frame.FadeInAsync();
     }
+
+    /// <summary>Clic sur la bulle engrenage : ouvre ou referme les paramètres.</summary>
+    public void ToggleSettings()
+    {
+        if (_current?.Bubble == SettingsBubble) HideCurrent(restoreFocus: true);
+        else OpenSettings();
+    }
+
+    public bool CurrentIsSettings => _current?.Bubble == SettingsBubble;
+
+    // Raccourcis coupés pendant qu'on en saisit un dans les paramètres, puis remis.
+    public void SuspendHotkeys() => _hotkeys.UnregisterAll();
+    public void ResumeHotkeys() => RegisterHotkeys();
+
+    public void ApplyStartupSetting() => ApplyStartup();
 
     public void MoveToScreen(string deviceName)
     {
+        bool settingsOpen = _current?.Bubble == SettingsBubble;
         CloseLauncher();
         Settings.Screen = deviceName;
         Settings.Save();
         _launcher.UpdatePlacement();
+        // Changé depuis les paramètres : ils se rouvrent sur le nouvel écran.
+        if (settingsOpen) _launcher.Dispatcher.BeginInvoke(OpenSettings, System.Windows.Threading.DispatcherPriority.Background);
     }
 
     /// <summary>

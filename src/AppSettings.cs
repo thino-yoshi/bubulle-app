@@ -82,6 +82,8 @@ public class AppSettings
     /// <summary>Curseur perso affiché au-dessus de Bulles (ex. celui d'AION2).</summary>
     public bool UseCustomCursor { get; set; }
     public string CursorPath { get; set; } = "";
+    /// <summary>Taille du curseur perso, en % de sa taille d'origine.</summary>
+    public int CursorScale { get; set; } = 100;
 
     /// <summary>Sons d'interface : déploiement / repli des bulles.</summary>
     public bool SoundEnabled { get; set; } = true;
