@@ -131,9 +131,11 @@ internal static class Native
         return pid;
     }
 
-    public static string? ProcessPath(IntPtr hwnd)
+    public static string? ProcessPath(IntPtr hwnd) => ProcessPathFromPid(ProcessId(hwnd));
+
+    public static string? ProcessPathFromPid(uint pid)
     {
-        var proc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, ProcessId(hwnd));
+        var proc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
         if (proc == IntPtr.Zero) return null;
         try
         {

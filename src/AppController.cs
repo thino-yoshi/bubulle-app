@@ -109,6 +109,7 @@ public sealed class AppController : IDisposable
         try
         {
             if (bubble.IsWeb) await ShowWeb(bubble);
+            else if (bubble.IsMixer) await ShowMixer(bubble);
             else await ShowApp(bubble);
             if (_current != null) _returnFocus = returnFocus;
         }
@@ -145,6 +146,15 @@ public sealed class AppController : IDisposable
         await frame.InitWebAsync(await WebEnvironment());
         await fade;
         frame.FocusContent();
+    }
+
+    private async Task ShowMixer(BubbleConfig bubble)
+    {
+        var frame = await GetReadyFrame(bubble);
+        frame.InitMixer();
+        frame.Show();
+        Activate(frame);
+        await frame.FadeInAsync();
     }
 
     /// <summary>Cadre prêt à apparaître en fondu (attend la fin d'un éventuel fondu de fermeture).</summary>
@@ -280,7 +290,7 @@ public sealed class AppController : IDisposable
         if (animate)
         {
             // App Windows : garée dans sa bulle (réouverture instantanée). Page web : simplement cachée.
-            _ = b.IsWeb ? frame.HideAnimatedAsync() : frame.ParkAnimatedAsync();
+            _ = b.IsWeb || b.IsMixer ? frame.HideAnimatedAsync() : frame.ParkAnimatedAsync();
         }
         else
         {
@@ -380,7 +390,7 @@ public sealed class AppController : IDisposable
     }
 
     private bool IsAlreadyBubble(AppEntry app) =>
-        Settings.Bubbles.Any(b => app.IsWeb
+        Settings.Bubbles.Any(b => app.Kind == "Mixer" ? b.IsMixer : app.IsWeb
             ? b.IsWeb && b.Url.Equals(app.Url, StringComparison.OrdinalIgnoreCase)
             : !b.IsWeb && (b.LaunchPath.Equals(app.LaunchPath, StringComparison.OrdinalIgnoreCase) ||
                            b.Name.Equals(app.Name, StringComparison.OrdinalIgnoreCase)));

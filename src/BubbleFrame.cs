@@ -270,9 +270,12 @@ public sealed class BubbleFrame : Window
         bar.Children.Add(_pin);
         DockPanel.SetDock(_opacity, Dock.Right);
         bar.Children.Add(_opacity);
-        var volume = BuildVolumeButton();
-        DockPanel.SetDock(volume, Dock.Right);
-        bar.Children.Add(volume);
+        if (!Bubble.IsMixer)
+        {
+            var volume = BuildVolumeButton();
+            DockPanel.SetDock(volume, Dock.Right);
+            bar.Children.Add(volume);
+        }
 
         if (Bubble.IsWeb)
         {
@@ -321,6 +324,15 @@ public sealed class BubbleFrame : Window
 
     public static ImageSource? IconFor(BubbleConfig b) =>
         b.IsWeb && string.IsNullOrEmpty(b.IconPath) ? IconLoader.CachedFavicon(b.Url) : IconLoader.Load(b.IconPath, b.IconIndex, b.LaunchPath);
+
+    // ---------- Mélangeur audio ----------
+
+    /// <summary>Le mélangeur audio de Bulles, dessiné directement dans la bulle.</summary>
+    public void InitMixer()
+    {
+        if (_host.Child is MixerView) return;
+        _host.Child = new MixerView();
+    }
 
     // ---------- Contenu web ----------
 

@@ -11,6 +11,8 @@ public class BubbleConfig
     public string Kind { get; set; } = "App";
     public string Url { get; set; } = "";
     public bool IsWeb => Kind == "Web";
+    /// <summary>"Mixer" = mélangeur audio intégré à Bulles.</summary>
+    public bool IsMixer => Kind == "Mixer";
     public string Name { get; set; } = "";
     public string LaunchPath { get; set; } = "";
     public string ProcessName { get; set; } = "";

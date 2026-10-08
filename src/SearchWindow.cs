@@ -143,6 +143,7 @@ public sealed class SearchWindow : Window
         AddSection("Fenêtres ouvertes", open);
         AddSection("Applications du PC", apps);
         // Toujours proposés : n'importe quel programme du PC, ou n'importe quel site web.
+        AddSection("Outils Bulles", Filter(new[] { MixerEntry }, q).ToList());
         _list.Items.Add(SectionHeader("Ajouter le tien"));
         _list.Items.Add(MakeItem(BrowseEntry));
         _list.Items.Add(MakeItem(AddSiteEntry));
@@ -164,6 +165,9 @@ public sealed class SearchWindow : Window
 
     /// <summary>Entrée spéciale « Parcourir… » : ouvre le sélecteur de fichiers.</summary>
     public static readonly AppEntry BrowseEntry = new() { Kind = "Browse", Name = "Parcourir… (un programme ou un raccourci)" };
+
+    /// <summary>Le mélangeur audio de Bulles, à ajouter comme une bulle.</summary>
+    public static readonly AppEntry MixerEntry = new() { Kind = "Mixer", Name = "Mélangeur audio" };
 
     /// <summary>Entrée spéciale « Ajouter un site web… » : ouvre la fenêtre nom + adresse.</summary>
     public static readonly AppEntry AddSiteEntry = new() { Kind = "AddSite", Name = "Ajouter un site web… (ta propre page)" };
@@ -197,7 +201,7 @@ public sealed class SearchWindow : Window
         else
             row.Children.Add(new TextBlock
             {
-                Text = app.Kind == "AddSite" ? "" : app.Kind == "Browse" ? "" : app.IsWeb ? "" : "",
+                Text = app.Kind == "Mixer" ? LauncherWindow.MixerGlyph : app.Kind == "AddSite" ? "" : app.Kind == "Browse" ? "" : app.IsWeb ? "" : "",
                 FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),
                 FontSize = 16, Width = 20, Margin = new Thickness(0, 0, 10, 0), VerticalAlignment = VerticalAlignment.Center,
             });

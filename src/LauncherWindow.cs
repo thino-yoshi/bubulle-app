@@ -21,6 +21,7 @@ public sealed class LauncherWindow : Window
     private const double MainSize = 54, AppSize = 46, PlusSize = 34, Spacing = 56, FirstOffset = 60;
 
     public static readonly Color Accent = Color.FromRgb(0x3D, 0xA5, 0xFF);
+    public const string MixerGlyph = "";
     private static readonly Brush AccentBrush = Frozen(new SolidColorBrush(Accent));
     private static readonly Brush BubbleFill = Frozen(new SolidColorBrush(Color.FromArgb(0xE0, 0x16, 0x1A, 0x22)));
     private static readonly Brush RingBrush = Frozen(new SolidColorBrush(Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF)));
@@ -94,7 +95,8 @@ public sealed class LauncherWindow : Window
         {
             var b = bubbles[i];
             var icon = BubbleFrame.IconFor(b);
-            var v = new BubbleVisual(AppSize, icon, icon == null ? b.Name[..1].ToUpperInvariant() : null) { ToolTip = b.Name };
+            string? glyph = icon != null ? null : b.IsMixer ? MixerGlyph : b.Name[..1].ToUpperInvariant();
+            var v = new BubbleVisual(AppSize, icon, glyph) { ToolTip = b.Name };
             v.MouseLeftButtonUp += (_, _) => _c.ToggleApp(b);
             var menu = new ContextMenu();
             var remove = new MenuItem { Header = "Retirer la bulle" };
@@ -307,15 +309,18 @@ public sealed class LauncherWindow : Window
             }
             else
             {
+                // Icône de police (ex. mélangeur) ou lettre / « + ».
+                bool isIcon = glyph is { Length: 1 } && glyph[0] >= '';
                 _content = new TextBlock
                 {
                     Text = glyph ?? "?",
-                    Foreground = Brushes.White,
-                    FontSize = size * 0.55,
+                    Foreground = isIcon ? AccentBrush : Brushes.White,
+                    FontFamily = isIcon ? new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets") : SystemFonts.MessageFontFamily,
+                    FontSize = size * (isIcon ? 0.44 : 0.55),
                     FontWeight = FontWeights.Light,
                     HorizontalAlignment = HorizontalAlignment.Center,
                     VerticalAlignment = VerticalAlignment.Center,
-                    Margin = new Thickness(0, 0, 0, size * 0.08),
+                    Margin = new Thickness(0, 0, 0, isIcon ? 0 : size * 0.08),
                 };
             }
             Children.Add(_content);
