@@ -534,7 +534,7 @@ public sealed class AppController : IDisposable
         }
 
         _lastHwnd.TryGetValue(bubble, out var preferred);
-        var hwnd = WindowFinder.Find(bubble.ProcessName, preferred);
+        var hwnd = WindowFinder.Find(bubble.ProcessName, preferred, bubble.TitleHint);
         if (hwnd == IntPtr.Zero)
         {
             if (!Launch(bubble)) return;
@@ -601,11 +601,11 @@ public sealed class AppController : IDisposable
         while (DateTime.Now < deadline)
         {
             await Task.Delay(300);
-            if (WindowFinder.Find(bubble.ProcessName, IntPtr.Zero) != IntPtr.Zero)
+            if (WindowFinder.Find(bubble.ProcessName, IntPtr.Zero, bubble.TitleHint) != IntPtr.Zero)
             {
                 // Laisse le temps à un éventuel écran de chargement de céder la place à la vraie fenêtre.
                 await Task.Delay(1500);
-                return WindowFinder.Find(bubble.ProcessName, IntPtr.Zero);
+                return WindowFinder.Find(bubble.ProcessName, IntPtr.Zero, bubble.TitleHint);
             }
         }
         return IntPtr.Zero;
@@ -770,6 +770,7 @@ public sealed class AppController : IDisposable
             Name = app.Name,
             LaunchPath = app.LaunchPath,
             ProcessName = app.ProcessName,
+            TitleHint = app.TitleHint,
             IconPath = app.IconPath,
             IconIndex = app.IconIndex,
             Hotkey = n < 9 ? $"Alt+{n + 1}" : "",

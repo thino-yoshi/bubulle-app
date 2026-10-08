@@ -26,6 +26,8 @@ public class BubbleConfig
     public string Name { get; set; } = "";
     public string LaunchPath { get; set; } = "";
     public string ProcessName { get; set; } = "";
+    /// <summary>Titre de fenêtre à reconnaître (app web installée depuis Chrome / Edge), vide sinon.</summary>
+    public string TitleHint { get; set; } = "";
     public string IconPath { get; set; } = "";
     public int IconIndex { get; set; }
 

@@ -21,6 +21,8 @@ public sealed class AppEntry
     public string Name { get; init; } = "";
     public string LaunchPath { get; init; } = "";
     public string ProcessName { get; init; } = "";
+    /// <summary>Texte du titre de la fenêtre à chercher (apps web de navigateur, qui partagent le programme du navigateur).</summary>
+    public string TitleHint { get; init; } = "";
     public string IconPath { get; init; } = "";
     public int IconIndex { get; init; }
 }
@@ -145,11 +147,14 @@ public static class AppCatalog
         // Les raccourcis vers des documents (.chm, .url, .txt…) ne sont pas des applications.
         if (target.Length > 0 && !target.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) return null;
 
+        var name = Path.GetFileNameWithoutExtension(lnkPath);
         return new AppEntry
         {
-            Name = Path.GetFileNameWithoutExtension(lnkPath),
+            Name = name,
             LaunchPath = lnkPath,
             ProcessName = ProcessNameFor(target, args),
+            // Une app web de navigateur se reconnaît à sa fenêtre : son titre contient le nom de l'app.
+            TitleHint = IsWebAppShortcut(target, args) ? name : "",
             IconPath = iconPath.Length > 0 ? iconPath : target,
             IconIndex = iconPath.Length > 0 ? iconIndex : 0,
         };
@@ -181,8 +186,17 @@ public static class AppCatalog
             var m = Regex.Match(args ?? "", "--processStart\\s+\"?([^\"\\s]+)");
             if (m.Success) return Path.GetFileNameWithoutExtension(m.Groups[1].Value);
         }
-        return Path.GetFileNameWithoutExtension(file);
+        // Applications web installées depuis Chrome / Edge / Brave (« Installer YouTube Music ») : le raccourci
+        // lance chrome_proxy.exe, mais la fenêtre appartient au navigateur lui-même.
+        var exe = Path.GetFileNameWithoutExtension(file);
+        if (IsWebAppShortcut(target, args)) return exe.Replace("_proxy", "", StringComparison.OrdinalIgnoreCase);
+        return exe;
     }
+
+    /// <summary>Raccourci d'une application web de navigateur (PWA) : « …_proxy.exe --app-id=… ».</summary>
+    public static bool IsWebAppShortcut(string target, string args) =>
+        Path.GetFileNameWithoutExtension(target).EndsWith("_proxy", StringComparison.OrdinalIgnoreCase)
+        && (args ?? "").Contains("--app-id", StringComparison.OrdinalIgnoreCase);
 }
 
 /// <summary>Apps web préréglées : il ne reste plus qu'à se connecter.</summary>

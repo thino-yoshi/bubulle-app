@@ -13,17 +13,17 @@ public static class WindowFinder
         "Shell_TrayWnd", "Shell_SecondaryTrayWnd", "Progman", "WorkerW", "Windows.UI.Core.CoreWindow",
     };
 
-    public static IntPtr Find(string processName, IntPtr preferred)
+    public static IntPtr Find(string processName, IntPtr preferred, string titleHint = "")
     {
         if (string.IsNullOrEmpty(processName)) return IntPtr.Zero;
-        if (preferred != IntPtr.Zero && IsCandidate(preferred, processName)) return preferred;
+        if (preferred != IntPtr.Zero && IsCandidate(preferred, processName, titleHint)) return preferred;
 
         // Plusieurs fenêtres possibles (écran de chargement de Discord, popups…) : on prend la plus grande.
         IntPtr best = IntPtr.Zero;
         long bestArea = -1;
         Native.EnumWindows((h, _) =>
         {
-            if (IsCandidate(h, processName))
+            if (IsCandidate(h, processName, titleHint))
             {
                 var p = new Native.WINDOWPLACEMENT { length = System.Runtime.InteropServices.Marshal.SizeOf<Native.WINDOWPLACEMENT>() };
                 Native.GetWindowPlacement(h, ref p);
@@ -71,7 +71,7 @@ public static class WindowFinder
         return !IgnoredClasses.Contains(Native.ClassName(h));
     }
 
-    private static bool IsCandidate(IntPtr h, string processName)
+    private static bool IsCandidate(IntPtr h, string processName, string titleHint = "")
     {
         if (!IsAppWindow(h)) return false;
         var cls = Native.ClassName(h);
@@ -81,6 +81,8 @@ public static class WindowFinder
 
         // explorer.exe possède aussi le bureau et la barre des tâches : seules les vraies fenêtres de dossier comptent.
         if (processName.Equals("explorer", StringComparison.OrdinalIgnoreCase) && cls != "CabinetWClass") return false;
+        // App web de navigateur : la bonne fenêtre est celle dont le titre contient le nom de l'app.
+        if (titleHint.Length > 0 && !Native.WindowTitle(h).Contains(titleHint, StringComparison.OrdinalIgnoreCase)) return false;
         return true;
     }
 }
