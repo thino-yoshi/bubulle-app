@@ -270,6 +270,9 @@ public sealed class BubbleFrame : Window
         bar.Children.Add(_pin);
         DockPanel.SetDock(_opacity, Dock.Right);
         bar.Children.Add(_opacity);
+        var volume = BuildVolumeButton();
+        DockPanel.SetDock(volume, Dock.Right);
+        bar.Children.Add(volume);
 
         if (Bubble.IsWeb)
         {
@@ -340,6 +343,8 @@ public sealed class BubbleFrame : Window
         };
         core.SourceChanged += (_, _) => { if (_address != null && !_address.IsKeyboardFocused) _address.Text = core.Source; };
         core.DocumentTitleChanged += (_, _) => Title = core.DocumentTitle;
+        await core.AddScriptToExecuteOnDocumentCreatedAsync(VolumeScript(Bubble.Volume / 100.0));
+        core.IsMuted = Bubble.Volume == 0;
         core.Navigate(Bubble.Url);
     }
 
@@ -391,6 +396,7 @@ public sealed class BubbleFrame : Window
 
         SyncNative();
         ForceRepaint();
+        ApplyStoredVolume();
         _sync.Start();
         return wasHidden;
     }
@@ -527,6 +533,118 @@ public sealed class BubbleFrame : Window
         Opacity = percent / 100.0;
         if (_native != IntPtr.Zero) Native.SetOpacity(_native, percent, _nativeExStyle);
     }
+
+    // ---------- Volume ----------
+
+    private TextBlock? _volumeIcon;
+
+    /// <summary>Haut-parleur dans la barre : un clic ouvre une jauge de volume pour cette bulle.</summary>
+    private FrameworkElement BuildVolumeButton()
+    {
+        _volumeIcon = Glyph(VolumeGlyph(Bubble.Volume));
+        var button = new ToggleButton { Content = _volumeIcon, ToolTip = "Volume de cette bulle" };
+        StyleButton(button);
+
+        var slider = new Slider
+        {
+            Minimum = 0, Maximum = 100, Value = Bubble.Volume, Width = 150,
+            IsSnapToTickEnabled = true, TickFrequency = 1, VerticalAlignment = VerticalAlignment.Center,
+        };
+        var label = new TextBlock { Foreground = Brushes.White, FontSize = 12.5, Width = 38, TextAlignment = TextAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
+        var mute = new Button { Content = Glyph(""), ToolTip = "Couper / remettre le son" };
+        StyleButton(mute);
+
+        int beforeMute = Bubble.Volume > 0 ? Bubble.Volume : 100;
+        mute.Click += (_, _) =>
+        {
+            if (slider.Value > 0) { beforeMute = (int)slider.Value; slider.Value = 0; }
+            else slider.Value = beforeMute;
+        };
+        void Update()
+        {
+            int v = (int)slider.Value;
+            label.Text = $"{v} %";
+            _volumeIcon.Text = VolumeGlyph(v);
+            SetVolume(v);
+        }
+        slider.ValueChanged += (_, _) => Update();
+        label.Text = $"{Bubble.Volume} %";
+
+        var row = new StackPanel { Orientation = Orientation.Horizontal };
+        row.Children.Add(mute);
+        row.Children.Add(slider);
+        row.Children.Add(label);
+        var popup = new Popup
+        {
+            PlacementTarget = button,
+            Placement = PlacementMode.Bottom,
+            HorizontalOffset = -80,
+            VerticalOffset = 6,
+            StaysOpen = false,
+            AllowsTransparency = true,
+            PopupAnimation = PopupAnimation.Fade,
+            Child = new Border
+            {
+                CornerRadius = new CornerRadius(10),
+                Background = new SolidColorBrush(Color.FromArgb(0xF5, 0x1C, 0x21, 0x2B)),
+                BorderBrush = new SolidColorBrush(Color.FromArgb(0x99, LauncherWindow.Accent.R, LauncherWindow.Accent.G, LauncherWindow.Accent.B)),
+                BorderThickness = new Thickness(1),
+                Padding = new Thickness(6, 4, 10, 4),
+                Child = row,
+            },
+        };
+        button.Checked += (_, _) => popup.IsOpen = true;
+        button.Unchecked += (_, _) => popup.IsOpen = false;
+        popup.Closed += (_, _) => button.IsChecked = false;
+        // La molette sur le haut-parleur règle aussi le volume, sans ouvrir la jauge.
+        button.MouseWheel += (_, e) => slider.Value = Math.Clamp(slider.Value + (e.Delta > 0 ? 5 : -5), 0, 100);
+        return button;
+    }
+
+    private static string VolumeGlyph(int v) => v == 0 ? "" : v < 34 ? "" : v < 67 ? "" : "";
+
+    private void SetVolume(int percent)
+    {
+        Bubble.Volume = percent;
+        if (Bubble.IsWeb) ApplyWebVolume();
+        else AppAudio.SetVolumeAsync(Bubble.ProcessName, percent);
+    }
+
+    /// <summary>Remet le volume mémorisé quand l'app entre dans sa bulle.</summary>
+    private void ApplyStoredVolume()
+    {
+        if (!Bubble.IsWeb && Bubble.Volume != 100) AppAudio.SetVolumeAsync(Bubble.ProcessName, Bubble.Volume);
+    }
+
+    private void ApplyWebVolume()
+    {
+        if (_web?.CoreWebView2 is not { } core) return;
+        core.IsMuted = Bubble.Volume == 0;
+        var factor = (Bubble.Volume / 100.0).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
+        _ = core.ExecuteScriptAsync($"window.__bullesSetVolume && window.__bullesSetVolume({factor})");
+    }
+
+    /// <summary>
+    /// Script injecté dans les pages web : le volume de la bulle s'applique PAR-DESSUS celui du site
+    /// (le curseur de YouTube garde sa propre valeur, on la multiplie juste par la jauge de la bulle).
+    /// </summary>
+    private static string VolumeScript(double factor) => """
+        (() => {
+          const d = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'volume');
+          if (!d || window.__bullesSetVolume) return;
+          const wanted = new WeakMap();
+          let factor = FACTOR;
+          const own = m => wanted.has(m) ? wanted.get(m) : d.get.call(m);
+          const apply = m => { const w = own(m); wanted.set(m, w); d.set.call(m, Math.max(0, Math.min(1, w * factor))); };
+          Object.defineProperty(HTMLMediaElement.prototype, 'volume', {
+            configurable: true,
+            get() { return own(this); },
+            set(v) { wanted.set(this, v); d.set.call(this, Math.max(0, Math.min(1, v * factor))); },
+          });
+          window.__bullesSetVolume = f => { factor = f; document.querySelectorAll('audio,video').forEach(apply); };
+          document.addEventListener('play', e => { if (e.target instanceof HTMLMediaElement) apply(e.target); }, true);
+        })();
+        """.Replace("FACTOR", factor.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture));
 
     private static TextBlock Glyph(string code) => new()
     {

@@ -25,6 +25,9 @@ public class BubbleConfig
     public int Height { get; set; }
 
     public string Hotkey { get; set; } = "";
+
+    /// <summary>Volume de la bulle en % (jauge du haut-parleur).</summary>
+    public int Volume { get; set; } = 100;
 }
 
 public class AppSettings
