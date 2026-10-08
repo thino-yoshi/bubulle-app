@@ -171,8 +171,9 @@ public sealed class LauncherView : UserControl
             tile.BeginAnimation(OpacityProperty, null);
             tile.Opacity = 0.9;
             Panel.SetZIndex(tile, 10);
-            var origin = tile.TranslatePoint(new Point(0, 0), _tiles);
-            _grabOffset = new Point(_holdStart.X - origin.X, _holdStart.Y - origin.Y);
+            int columns = Math.Max(1, (int)(_tiles.ActualWidth / SlotWidth));
+            int index = _tiles.Children.IndexOf(tile);
+            _grabOffset = new Point(_holdStart.X - index % columns * SlotWidth, _holdStart.Y - index / columns * SlotHeight);
             tile.RenderTransform = new TranslateTransform();
         };
         _holdTimer.Start();
@@ -188,33 +189,33 @@ public sealed class LauncherView : UserControl
             return;
         }
 
-        // La tuile la plus proche de la souris donne la nouvelle place.
-        int target = -1;
-        double best = double.MaxValue;
-        for (int i = 0; i < _launcher.Apps.Count && i < _tiles.Children.Count; i++)
-        {
-            if (_tiles.Children[i] is not Border other) continue;
-            var c = other.TranslatePoint(new Point(other.ActualWidth / 2, other.ActualHeight / 2), _tiles);
-            if (other == tile && other.RenderTransform is TranslateTransform tt) c = new Point(c.X - tt.X, c.Y - tt.Y);
-            double d = (c - p).LengthSquared;
-            if (d < best) { best = d; target = i; }
-        }
+        // La case visée est calculée sur la grille (colonne, ligne sous la souris), sans relire la position
+        // des tuiles : sinon la grille se réorganise, les positions changent, et deux tuiles s'échangent en boucle.
+        int columns = Math.Max(1, (int)(_tiles.ActualWidth / SlotWidth));
+        int count = _launcher.Apps.Count;
         int current = _tiles.Children.IndexOf(tile);
-        if (target >= 0 && target != current)
+        double fx = p.X / SlotWidth, fy = p.Y / SlotHeight;
+        int col = Math.Clamp((int)fx, 0, columns - 1), row = Math.Max(0, (int)fy);
+        int target = Math.Clamp(row * columns + col, 0, count - 1);
+        // Tolérance : on ne change de case que quand la souris est bien entrée dedans (pas sur la bordure).
+        bool wellInside = Math.Abs(fx - Math.Floor(fx) - 0.5) < 0.38 && Math.Abs(fy - Math.Floor(fy) - 0.5) < 0.38;
+        if (wellInside && target != current && current >= 0)
         {
             var app = (LauncherApp)tile.Tag;
             _launcher.Apps.Remove(app);
             _launcher.Apps.Insert(target, app);
             _tiles.Children.Remove(tile);
             _tiles.Children.Insert(target, tile);
-            _tiles.UpdateLayout();
+            current = target;
         }
 
-        // Suit la souris depuis sa nouvelle place dans la grille.
-        tile.RenderTransform = new TranslateTransform();
-        var slot = tile.TranslatePoint(new Point(0, 0), _tiles);
-        tile.RenderTransform = new TranslateTransform(p.X - _grabOffset.X - slot.X, p.Y - _grabOffset.Y - slot.Y);
+        // La tuile suit la souris, depuis sa case actuelle (position calculée, pas mesurée).
+        double slotX = current % columns * SlotWidth, slotY = current / columns * SlotHeight;
+        tile.RenderTransform = new TranslateTransform(p.X - _grabOffset.X - slotX, p.Y - _grabOffset.Y - slotY);
     }
+
+    // Taille d'une case de la grille : tuile (92 × 86) + marge (8).
+    private const double SlotWidth = 100, SlotHeight = 94;
 
     private void EndHold(Border tile, LauncherApp app)
     {
