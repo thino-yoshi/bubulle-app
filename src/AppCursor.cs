@@ -109,12 +109,50 @@ public static class AppCursor
     }
 
     /// <summary>Copie le curseur affiché en ce moment (celui du jeu au premier plan). Retourne le chemin, ou null.</summary>
+    public enum CaptureResult { Captured, StandardArrow, NoCursor }
+
+    [DllImport("user32.dll")] private static extern IntPtr LoadCursor(IntPtr instance, IntPtr name);
+    [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(Native.POINT pt);
+
+    private static bool IsOverBubulle(Native.POINT pt) => Native.ProcessId(WindowFromPoint(pt)) == (uint)Environment.ProcessId;
+    private static readonly IntPtr IDC_ARROW = new(32512);
+
+    /// <summary>
+    /// Surveille le curseur pendant un moment et copie le premier qui n'est pas la flèche normale de Windows.
+    /// Un curseur choisi par le jeu mais masqué est accepté aussi ; si le jeu dessine lui-même son curseur
+    /// dans son image, Windows n'en a aucun et la copie est impossible (NoCursor).
+    /// </summary>
+    public static async System.Threading.Tasks.Task<(CaptureResult Result, string? Path)> CaptureBestAsync(TimeSpan window)
+    {
+        var arrow = LoadCursor(IntPtr.Zero, IDC_ARROW);
+        bool sawArrow = false;
+        var end = DateTime.Now + window;
+        do
+        {
+            var info = new CURSORINFO { cbSize = Marshal.SizeOf<CURSORINFO>() };
+            // Souris encore au-dessus de Bubulle (son propre curseur perso) : on attend qu'elle soit sur le jeu.
+            if (GetCursorInfo(ref info) && info.hCursor != IntPtr.Zero && !IsOverBubulle(info.pt))
+            {
+                if (info.hCursor == arrow) sawArrow = true;
+                else if (Copy(info.hCursor) is { } path) return (CaptureResult.Captured, path);
+            }
+            await System.Threading.Tasks.Task.Delay(100);
+        }
+        while (DateTime.Now < end);
+        return sawArrow ? (CaptureResult.StandardArrow, null) : (CaptureResult.NoCursor, null);
+    }
+
     public static string? CaptureCurrent()
     {
         var info = new CURSORINFO { cbSize = Marshal.SizeOf<CURSORINFO>() };
         if (!GetCursorInfo(ref info) || (info.flags & CURSOR_SHOWING) == 0 || info.hCursor == IntPtr.Zero) return null;
+        return Copy(info.hCursor);
+    }
 
-        var copy = CopyIcon(info.hCursor);
+    /// <summary>Copie un curseur dans cursor.cur (image + point de clic). Retourne le chemin, ou null.</summary>
+    private static string? Copy(IntPtr cursor)
+    {
+        var copy = CopyIcon(cursor);
         if (copy == IntPtr.Zero) return null;
         try
         {

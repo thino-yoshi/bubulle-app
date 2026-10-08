@@ -140,14 +140,17 @@ public sealed class SettingsView : UserControl
             capture.IsEnabled = false;
             for (int s = 5; s > 0; s--)
             {
-                status.Text = $"Passe sur ton jeu et laisse la souris immobile… {s}";
+                status.Text = $"Passe sur ton jeu et laisse la souris dessus… {s}";
                 await System.Threading.Tasks.Task.Delay(1000);
             }
-            var path = AppCursor.CaptureCurrent();
+            status.Text = "Capture en cours… bouge un peu la souris sur le jeu.";
+            var (result, path) = await AppCursor.CaptureBestAsync(TimeSpan.FromSeconds(2));
             capture.IsEnabled = true;
-            if (path == null)
+            if (result != AppCursor.CaptureResult.Captured || path == null)
             {
-                status.Text = "Aucun curseur visible à ce moment-là. Réessaie avec la souris sur le jeu.";
+                status.Text = result == AppCursor.CaptureResult.StandardArrow
+                    ? "C'était la flèche normale de Windows : la souris n'était pas sur le jeu, ou le jeu n'a pas de curseur à lui. Réessaie."
+                    : "Ce jeu dessine lui-même son curseur dans son image : Windows n'en voit aucun, impossible de le copier. Utilise « Choisir un fichier… » avec un .cur ou .ani.";
                 return;
             }
             _s.CursorPath = path;
