@@ -130,14 +130,29 @@ public sealed class DownloadMonitor
         if (partial.Any(p => !_totals.ContainsKey(p))) ReadTotals(userData);
 
         long received = 0, total = 0;
+        bool unknownTotal = false;
+        var now = DateTime.Now;
         foreach (var p in partial)
         {
-            if (!_totals.TryGetValue(p, out var size) || size <= 0) continue;
-            try { received += new FileInfo(p).Length; } catch { continue; }
+            long length;
+            try { length = new FileInfo(p).Length; } catch { continue; }
+            // En pause (le fichier ne grossit plus) : pas de jauge.
+            if (!_growth.TryGetValue(p, out var g) || g.Length != length) _growth[p] = g = (length, now);
+            if (now - g.Changed > TimeSpan.FromSeconds(20)) continue;
+
+            // Taille totale inconnue (ex. fichier « Non confirmé », absent de l'historique) : jauge sans pourcentage.
+            if (!_totals.TryGetValue(p, out var size) || size <= 0) { unknownTotal = true; continue; }
+            received += length;
             total += size;
         }
         if (total > 0) result[exe] = Math.Min(1, (double)received / total);
+        else if (unknownTotal) result[exe] = Indeterminate;
     }
+
+    /// <summary>Valeur « ça télécharge, mais on ne sait pas combien » (anneau qui tourne).</summary>
+    public const double Indeterminate = -1;
+
+    private readonly Dictionary<string, (long Length, DateTime Changed)> _growth = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly Dictionary<string, (List<string> Folders, DateTime Read)> _folders = new(StringComparer.OrdinalIgnoreCase);
 

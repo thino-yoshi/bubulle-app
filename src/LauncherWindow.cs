@@ -287,6 +287,7 @@ public sealed class LauncherWindow : Window
     {
         if (!IsOpen) _c.Sounds.PlayOpen();
         IsOpen = true;
+        UpdateMainProgress();
         Native.SetWindowPos(new WindowInteropHelper(this).Handle, Native.HWND_TOPMOST, 0, 0, 0, 0,
             Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
         int i = 0;
@@ -302,6 +303,7 @@ public sealed class LauncherWindow : Window
     {
         if (IsOpen && animated) _c.Sounds.PlayClose();
         IsOpen = false;
+        UpdateMainProgress();
         foreach (var el in AllItems())
         {
             if (!animated)
@@ -367,6 +369,24 @@ public sealed class LauncherWindow : Window
             };
             host.Children.Add(ring);
         }
+        var rotate = (RotateTransform)ring.RenderTransform;
+        if (value.Value < 0)
+        {
+            // Pourcentage inconnu : un quart d'anneau qui tourne.
+            ring.StrokeDashArray = new DoubleCollection { perimeter * 0.25, perimeter };
+            if (ring.Tag is not "spinning")
+            {
+                ring.Tag = "spinning";
+                rotate.BeginAnimation(RotateTransform.AngleProperty, new DoubleAnimation(-90, 270, TimeSpan.FromSeconds(1.2)) { RepeatBehavior = RepeatBehavior.Forever });
+            }
+            return ring;
+        }
+        if (ring.Tag is "spinning")
+        {
+            ring.Tag = null;
+            rotate.BeginAnimation(RotateTransform.AngleProperty, null);
+            rotate.Angle = -90;
+        }
         double filled = Math.Clamp(value.Value, 0, 1) * perimeter;
         ring.StrokeDashArray = new DoubleCollection { Math.Max(0.01, filled), perimeter + 1 };
         return ring;
@@ -380,7 +400,22 @@ public sealed class LauncherWindow : Window
         var list = _c.Settings.Bubbles;
         for (int i = 0; i < _apps.Count && i < list.Count; i++)
             _apps[i].SetProgress(_progress.TryGetValue(list[i], out var v) ? v : null);
-        _mainProgress = UpdateProgressRing(_main, _mainProgress, _progress.Count > 0 ? _progress.Values.Max() : null, MainSize);
+        UpdateMainProgress();
+    }
+
+    /// <summary>
+    /// La bulle principale ne montre le téléchargement que quand la cascade est repliée ;
+    /// une fois déployée, il n'apparaît plus que sur la bulle de l'app concernée.
+    /// </summary>
+    private void UpdateMainProgress()
+    {
+        double? value = null;
+        if (!IsOpen && _progress.Count > 0)
+        {
+            var known = _progress.Values.Where(v => v >= 0).ToList();
+            value = known.Count > 0 ? known.Max() : DownloadMonitor.Indeterminate;
+        }
+        _mainProgress = UpdateProgressRing(_main, _mainProgress, value, MainSize);
     }
 
     /// <summary>Valeur de pastille « point » : de l'activité, sans nombre connu (apps de bureau).</summary>

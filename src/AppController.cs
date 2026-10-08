@@ -952,10 +952,14 @@ public sealed class AppController : IDisposable
             {
                 // Bulle de l'app elle-même (Chrome, Steam…), ou lanceur qui contient l'app.
                 var processes = b.IsLauncher ? b.Apps.Select(LauncherAppProcess) : new[] { b.ProcessName };
-                double best = -1;
+                // Un pourcentage connu l'emporte sur « en cours, total inconnu ».
+                double? best = null;
                 foreach (var p in processes)
-                    if (!string.IsNullOrEmpty(p) && byProcess.TryGetValue(p, out var v)) best = Math.Max(best, v);
-                if (best >= 0) perBubble[b] = best;
+                {
+                    if (string.IsNullOrEmpty(p) || !byProcess.TryGetValue(p, out var v)) continue;
+                    best = best == null ? v : Math.Max(best.Value, v);
+                }
+                if (best != null) perBubble[b] = best.Value;
             }
             _launcher.SetProgress(perBubble);
         }
