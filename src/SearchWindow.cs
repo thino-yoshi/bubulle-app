@@ -115,6 +115,11 @@ public sealed class SearchWindow : Window
             Refresh();
             _all = await AppCatalog.GetAsync() ?? new List<AppEntry>();
             Refresh();
+            // Puis on relit la liste en arrière-plan : une app installée entre-temps apparaît en quelques secondes.
+            var fresh = await AppCatalog.RescanAsync();
+            if (_closing) return;
+            _all = fresh;
+            Refresh();
         };
         Closing += (_, _) => _closing = true;
     }

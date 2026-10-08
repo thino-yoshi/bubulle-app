@@ -40,6 +40,17 @@ public static class AppCatalog
 
     public static Task<List<AppEntry>> GetAsync() => _loading ??= RunOnSta(Scan);
 
+    /// <summary>
+    /// Relit la liste des apps (une app installée pendant que Bubulle tourne apparaît ainsi dans la recherche).
+    /// La liste précédente reste servie tant que la nouvelle n'est pas prête.
+    /// </summary>
+    public static async Task<List<AppEntry>> RescanAsync()
+    {
+        var fresh = await RunOnSta(Scan);
+        if (fresh != null) _loading = Task.FromResult(fresh);
+        return fresh ?? await GetAsync() ?? new List<AppEntry>();
+    }
+
     private static Task<T> RunOnSta<T>(Func<T> work)
     {
         var tcs = new TaskCompletionSource<T>();
