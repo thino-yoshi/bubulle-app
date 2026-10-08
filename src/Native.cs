@@ -8,7 +8,7 @@ internal static class Native
 {
     public const int GWL_EXSTYLE = -20, GWL_STYLE = -16, GWLP_HWNDPARENT = -8;
     public const long WS_CAPTION = 0xC00000, WS_THICKFRAME = 0x40000, WS_MAXIMIZE = 0x1000000, WS_MINIMIZE = 0x20000000;
-    public const long WS_EX_TOOLWINDOW = 0x80;
+    public const long WS_EX_TOOLWINDOW = 0x80, WS_EX_TRANSPARENT = 0x20;
     public const long WS_EX_LAYERED = 0x80000;
     public const uint LWA_ALPHA = 0x2;
 
@@ -69,6 +69,14 @@ internal static class Native
     [DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr h);
     [DllImport("user32.dll")] public static extern IntPtr GetWindow(IntPtr h, int cmd);
     [DllImport("user32.dll")] public static extern int GetWindowTextLength(IntPtr h);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr h, StringBuilder sb, int max);
+
+    public static string WindowTitle(IntPtr h)
+    {
+        var sb = new StringBuilder(512);
+        GetWindowText(h, sb, sb.Capacity);
+        return sb.ToString();
+    }
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr h, StringBuilder sb, int max);
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] public static extern IntPtr GetWindowLongPtr(IntPtr h, int idx);

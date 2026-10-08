@@ -91,12 +91,17 @@ public sealed class BubbleFrame : Window
         StyleButton(_pin);
 
         var root = new Grid();
-        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(HeaderHeight) });
+        _headerRow = new RowDefinition { Height = new GridLength(HeaderHeight) };
+        root.RowDefinitions.Add(_headerRow);
         root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        var header = BuildHeader();
-        Grid.SetRow(header, 0);
+        _header = BuildHeader();
+        _miniHeader = BuildMiniHeader();
+        _miniHeader.Visibility = Visibility.Collapsed;
+        Grid.SetRow(_header, 0);
+        Grid.SetRow(_miniHeader, 0);
         Grid.SetRow(_host, 1);
-        root.Children.Add(header);
+        root.Children.Add(_header);
+        root.Children.Add(_miniHeader);
         root.Children.Add(_host);
         Content = new Border
         {
@@ -268,6 +273,16 @@ public sealed class BubbleFrame : Window
         bar.Children.Add(hide);
         DockPanel.SetDock(_pin, Dock.Right);
         bar.Children.Add(_pin);
+        var mini = new Button { Content = Glyph(""), ToolTip = "Mini-lecteur (petite fenêtre flottante)" };
+        StyleButton(mini);
+        mini.Click += (_, _) => _c.ToggleMini(this);
+        DockPanel.SetDock(mini, Dock.Right);
+        bar.Children.Add(mini);
+        var through = new Button { Content = Glyph(""), ToolTip = "Traversable : la souris passe à travers (clique sur sa bulle pour la reprendre)" };
+        StyleButton(through);
+        through.Click += (_, _) => _c.ToggleClickThrough(this);
+        DockPanel.SetDock(through, Dock.Right);
+        bar.Children.Add(through);
         DockPanel.SetDock(_opacity, Dock.Right);
         bar.Children.Add(_opacity);
         if (!Bubble.IsMixer)
@@ -322,6 +337,125 @@ public sealed class BubbleFrame : Window
 
     private static Border Wrap(FrameworkElement bar) => new() { Child = bar, Background = Brushes.Transparent };
 
+    // ---------- Mini-lecteur et mode traversable ----------
+
+    private const double MiniHeaderHeight = 28;
+    private readonly RowDefinition _headerRow;
+    private readonly FrameworkElement _header, _miniHeader;
+    private int _opacityBeforeClickThrough;
+
+    /// <summary>Petite fenêtre flottante, indépendante de la cascade.</summary>
+    public bool IsMini { get; private set; }
+
+    /// <summary>La souris passe à travers la bulle (pour jouer avec un guide affiché par-dessus).</summary>
+    public bool ClickThrough { get; private set; }
+
+    /// <summary>Barre compacte du mini-lecteur : on la tient pour déplacer, et deux boutons.</summary>
+    private FrameworkElement BuildMiniHeader()
+    {
+        var bar = new DockPanel { LastChildFill = true, Margin = new Thickness(8, 0, 4, 0) };
+        var close = new Button { Content = Glyph(""), ToolTip = "Fermer" };
+        var restore = new Button { Content = Glyph(""), ToolTip = "Agrandir à côté de sa bulle" };
+        var through = new Button { Content = Glyph(""), ToolTip = "Traversable" };
+        foreach (var b in new[] { close, restore, through })
+        {
+            StyleButton(b);
+            b.Height = 24;
+            b.Width = 26;
+            DockPanel.SetDock(b, Dock.Right);
+            bar.Children.Add(b);
+        }
+        close.Click += (_, _) => _c.HideFrame(this);
+        restore.Click += (_, _) => _c.ToggleMini(this);
+        through.Click += (_, _) => _c.ToggleClickThrough(this);
+
+        var icon = IconFor(Bubble);
+        if (icon != null)
+        {
+            var img = new Image { Source = icon, Width = 14, Height = 14, Margin = new Thickness(0, 0, 6, 0), VerticalAlignment = VerticalAlignment.Center };
+            DockPanel.SetDock(img, Dock.Left);
+            bar.Children.Add(img);
+        }
+        bar.Children.Add(new TextBlock
+        {
+            Text = Bubble.Name, Foreground = HeaderFg, FontSize = 11.5, VerticalAlignment = VerticalAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        });
+        var grip = new Border { Child = bar, Background = Brushes.Transparent, Cursor = Cursors.SizeAll, ToolTip = "Tiens pour déplacer" };
+        grip.MouseLeftButtonDown += (_, e) => { if (e.OriginalSource is not TextBlock { Parent: ButtonBase }) DragMove(); };
+        return grip;
+    }
+
+    public void EnterMini(Rect rect)
+    {
+        IsMini = true;
+        _header.Visibility = Visibility.Collapsed;
+        _miniHeader.Visibility = Visibility.Visible;
+        _headerRow.Height = new GridLength(MiniHeaderHeight);
+        MinWidth = 200;
+        MinHeight = 120;
+        Left = rect.Left;
+        Top = rect.Top;
+        Width = rect.Width;
+        Height = rect.Height;
+    }
+
+    public void ExitMini()
+    {
+        if (!IsMini) return;
+        IsMini = false;
+        _miniHeader.Visibility = Visibility.Collapsed;
+        _header.Visibility = Visibility.Visible;
+        _headerRow.Height = new GridLength(HeaderHeight);
+        MinWidth = Math.Max(MinWidth, DefaultMinWidth);
+        MinHeight = Math.Max(MinHeight, DefaultMinHeight);
+    }
+
+    public void SetClickThrough(bool on)
+    {
+        if (ClickThrough == on) return;
+        ClickThrough = on;
+        if (on)
+        {
+            // Semi-transparente pour bien voir le jeu derrière (ta valeur revient quand tu la reprends).
+            _opacityBeforeClickThrough = _opacityPercent;
+            if (_opacityPercent > 70) _opacity.Value = 70;
+        }
+        else if (_opacityBeforeClickThrough > 0)
+        {
+            _opacity.Value = _opacityBeforeClickThrough;
+            _opacityBeforeClickThrough = 0;
+        }
+        ApplyClickThroughStyle();
+    }
+
+    private void ApplyClickThroughStyle()
+    {
+        foreach (var h in new[] { Hwnd, _native })
+        {
+            if (h == IntPtr.Zero) continue;
+            long ex = Native.GetExStyle(h);
+            Native.SetExStyle(h, ClickThrough ? ex | Native.WS_EX_TRANSPARENT | Native.WS_EX_LAYERED : ex & ~Native.WS_EX_TRANSPARENT);
+        }
+    }
+
+    /// <summary>Charge la page web en arrière-plan, sans l'afficher : les pastilles de notification marchent dès le démarrage.</summary>
+    public async Task PreloadWebAsync(CoreWebView2Environment env)
+    {
+        if (_web != null) return;
+        PrepareShow();
+        ShowActivated = false;
+        Left = -32000;
+        Top = -32000;
+        Show();
+        try { await InitWebAsync(env); }
+        finally
+        {
+            Hide();
+            ShowActivated = true;
+        }
+    }
+
     public static ImageSource? IconFor(BubbleConfig b) =>
         b.IsWeb && string.IsNullOrEmpty(b.IconPath) ? IconLoader.CachedFavicon(b.Url) : IconLoader.Load(b.IconPath, b.IconIndex, b.LaunchPath);
 
@@ -354,7 +488,11 @@ public sealed class BubbleFrame : Window
             else OpenExternal(e.Uri);
         };
         core.SourceChanged += (_, _) => { if (_address != null && !_address.IsKeyboardFocused) _address.Text = core.Source; };
-        core.DocumentTitleChanged += (_, _) => Title = core.DocumentTitle;
+        core.DocumentTitleChanged += (_, _) =>
+        {
+            Title = core.DocumentTitle;
+            _c.OnContentTitle(Bubble, core.DocumentTitle);
+        };
         await core.AddScriptToExecuteOnDocumentCreatedAsync(VolumeScript(Bubble.Volume / 100.0));
         core.IsMuted = Bubble.Volume == 0;
         core.Navigate(Bubble.Url);
@@ -541,9 +679,9 @@ public sealed class BubbleFrame : Window
     {
         _opacityPercent = percent;
         _alpha = TargetAlpha;
-        var h = Hwnd;
         Opacity = percent / 100.0;
         if (_native != IntPtr.Zero) Native.SetOpacity(_native, percent, _nativeExStyle);
+        if (ClickThrough) ApplyClickThroughStyle();
     }
 
     // ---------- Volume ----------

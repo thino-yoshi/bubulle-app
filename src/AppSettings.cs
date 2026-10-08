@@ -48,6 +48,15 @@ public class AppSettings
     public int DefaultWidthPct { get; set; } = 45;
     public int DefaultHeightPct { get; set; } = 65;
     public bool AutoHide { get; set; }
+
+    /// <summary>Position et taille du mini-lecteur (unités WPF), 0 = coin par défaut.</summary>
+    public double MiniLeft { get; set; }
+    public double MiniTop { get; set; }
+    public double MiniWidth { get; set; }
+    public double MiniHeight { get; set; }
+
+    /// <summary>Charge les sites web en arrière-plan au démarrage (pastilles de notification).</summary>
+    public bool PreloadWeb { get; set; } = true;
     public bool StartWithWindows { get; set; }
     public List<BubbleConfig> Bubbles { get; set; } = new();
 

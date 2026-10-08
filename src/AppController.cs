@@ -29,6 +29,11 @@ public sealed class AppController : IDisposable
     private readonly Dictionary<BubbleConfig, BubbleFrame> _frames = new();
 
     private BubbleFrame? _current;
+    /// <summary>Bulles en mini-lecteur ou traversables : elles restent affichées, indépendamment de la cascade.</summary>
+    private readonly HashSet<BubbleFrame> _floating = new();
+    private readonly Dictionary<BubbleConfig, int> _badges = new();
+    private readonly System.Windows.Threading.DispatcherTimer _badgeTimer = new() { Interval = TimeSpan.FromSeconds(2) };
+    private bool _clickThroughTipShown;
     private IntPtr _returnFocus;
     private SearchWindow? _search;
     private SettingsWindow? _settingsWindow;
@@ -63,6 +68,137 @@ public sealed class AppController : IDisposable
 
         // Remet à jour la tâche de démarrage (chemin de l'app, migration depuis l'ancienne clé Run).
         if (Settings.StartWithWindows) ApplyStartup();
+
+        _badgeTimer.Tick += (_, _) => PollAppBadges();
+        _badgeTimer.Start();
+        if (Settings.PreloadWeb) _ = PreloadWebBubbles();
+    }
+
+    // ---------- Pastilles de notification ----------
+
+    private static readonly System.Text.RegularExpressions.Regex BadgePattern = new(@"^\s*\((\d+)\+?\)");
+
+    /// <summary>« (3) Discord », « (12) WhatsApp » : le nombre de non-lus que les sites mettent dans leur titre.</summary>
+    public void OnContentTitle(BubbleConfig bubble, string title)
+    {
+        var m = BadgePattern.Match(title ?? "");
+        SetBadge(bubble, m.Success && int.TryParse(m.Groups[1].Value, out var n) ? n : 0);
+    }
+
+    private void SetBadge(BubbleConfig bubble, int count)
+    {
+        if (_badges.TryGetValue(bubble, out var old) && old == count) return;
+        _badges[bubble] = count;
+        _launcher.SetBadge(bubble, count, _badges.Where(kv => Settings.Bubbles.Contains(kv.Key)).Sum(kv => kv.Value));
+    }
+
+    /// <summary>Apps Windows : même principe, avec le titre de leur fenêtre.</summary>
+    private void PollAppBadges()
+    {
+        foreach (var b in Settings.Bubbles.Where(b => b.Kind == "App"))
+        {
+            var hwnd = _frames.TryGetValue(b, out var f) && f.NativeHwnd != IntPtr.Zero ? f.NativeHwnd
+                : _lastHwnd.TryGetValue(b, out var h) ? h : IntPtr.Zero;
+            if (hwnd != IntPtr.Zero && Native.IsWindow(hwnd)) OnContentTitle(b, Native.WindowTitle(hwnd));
+        }
+    }
+
+    /// <summary>Charge les sites des bulles en arrière-plan pour que leurs pastilles marchent dès le démarrage.</summary>
+    private async Task PreloadWebBubbles()
+    {
+        await Task.Delay(3000);
+        foreach (var b in Settings.Bubbles.Where(b => b.IsWeb).ToList())
+        {
+            if (_disposed || _frames.ContainsKey(b)) continue;
+            try { await GetFrame(b).PreloadWebAsync(await WebEnvironment()); }
+            catch (Exception ex) { App.Log(ex); }
+        }
+    }
+
+    // ---------- Mini-lecteur et mode traversable ----------
+
+    public void ToggleMini(BubbleFrame frame)
+    {
+        if (!frame.IsMini)
+        {
+            MakeFloating(frame);
+            frame.EnterMini(MiniRect());
+            return;
+        }
+        RememberMiniRect(frame);
+        frame.ExitMini();
+        if (!frame.ClickThrough) Reattach(frame);
+    }
+
+    public void ToggleClickThrough(BubbleFrame frame)
+    {
+        if (!frame.ClickThrough)
+        {
+            MakeFloating(frame);
+            frame.SetClickThrough(true);
+            if (!_clickThroughTipShown)
+            {
+                _clickThroughTipShown = true;
+                Notify($"{frame.Bubble.Name} est traversable : clique sur sa bulle pour la reprendre en main.");
+            }
+            return;
+        }
+        frame.SetClickThrough(false);
+        if (!frame.IsMini) Reattach(frame);
+    }
+
+    /// <summary>La bulle quitte la cascade et reste affichée par-dessus le jeu ; le focus revient au jeu.</summary>
+    private void MakeFloating(BubbleFrame frame)
+    {
+        _floating.Add(frame);
+        if (_current != frame) return;
+        _current = null;
+        _launcher.SetActive(null);
+        if (_returnFocus != IntPtr.Zero && Native.IsWindow(_returnFocus)) Native.SetForegroundWindow(_returnFocus);
+    }
+
+    /// <summary>Remet une bulle flottante à côté de sa bulle, comme une bulle ouverte normalement.</summary>
+    private void Reattach(BubbleFrame frame)
+    {
+        _floating.Remove(frame);
+        if (_current != null && _current != frame) HideCurrent(restoreFocus: false);
+        if (!_launcher.IsOpen) _launcher.Open();
+        PlaceFrame(frame);
+        _returnFocus = _lastExternalForeground;
+        Activate(frame);
+        frame.FocusContent();
+    }
+
+    /// <summary>Clic sur la bulle d'une fenêtre flottante : on la reprend en main.</summary>
+    private void ReclaimFloating(BubbleFrame frame)
+    {
+        if (frame.ClickThrough) frame.SetClickThrough(false);
+        if (frame.IsMini)
+        {
+            RememberMiniRect(frame);
+            frame.ExitMini();
+        }
+        Reattach(frame);
+    }
+
+    private Rect MiniRect()
+    {
+        var wa = Screens.WorkAreaDip(Settings);
+        double w = Settings.MiniWidth > 0 ? Settings.MiniWidth : 420, h = Settings.MiniHeight > 0 ? Settings.MiniHeight : 270;
+        var saved = new Rect(Settings.MiniLeft, Settings.MiniTop, w, h);
+        if (Settings.MiniWidth > 0 && wa.IntersectsWith(saved)) return saved;
+        // Par défaut : en bas, du côté opposé aux bulles.
+        double left = Settings.IsLeft ? wa.Right - w - 16 : wa.Left + 16;
+        return new Rect(left, wa.Bottom - h - 16, w, h);
+    }
+
+    private void RememberMiniRect(BubbleFrame frame)
+    {
+        Settings.MiniLeft = frame.Left;
+        Settings.MiniTop = frame.Top;
+        Settings.MiniWidth = frame.ActualWidth;
+        Settings.MiniHeight = frame.ActualHeight;
+        Settings.Save();
     }
 
     /// <summary>Un seul moteur web partagé : tes connexions (Discord, etc.) sont gardées entre les sessions.</summary>
@@ -92,6 +228,13 @@ public sealed class AppController : IDisposable
     {
         if (_busy || !Settings.Bubbles.Contains(bubble)) return;
         _search?.SafeClose();
+
+        if (_frames.TryGetValue(bubble, out var floating) && _floating.Contains(floating))
+        {
+            if (fromHotkey && !_launcher.IsOpen) _launcher.Open();
+            ReclaimFloating(floating);
+            return;
+        }
 
         if (_current?.Bubble == bubble)
         {
@@ -266,6 +409,16 @@ public sealed class AppController : IDisposable
 
     public void HideFrame(BubbleFrame frame)
     {
+        if (_floating.Remove(frame))
+        {
+            // Fermeture d'un mini-lecteur ou d'une bulle traversable.
+            if (frame.IsMini) RememberMiniRect(frame);
+            frame.SetClickThrough(false);
+            frame.ExitMini();
+            var b = frame.Bubble;
+            _ = b.IsWeb || b.IsMixer ? frame.HideAnimatedAsync() : frame.ParkAnimatedAsync();
+            return;
+        }
         if (_current == frame) HideCurrent(restoreFocus: true);
         else frame.Hide();
     }
@@ -307,6 +460,7 @@ public sealed class AppController : IDisposable
     {
         if (hwnd == IntPtr.Zero || Native.ProcessId(hwnd) == _ourPid) return;
         if (_current != null && hwnd == _current.NativeHwnd) return;
+        if (_floating.Any(f => f.NativeHwnd == hwnd)) return;
         // Les fenêtres du moteur web (msedgewebview2) appartiennent à Bulles.
         if (Native.ClassName(hwnd).StartsWith("Chrome_WidgetWin", StringComparison.Ordinal) &&
             Native.ProcessPath(hwnd)?.EndsWith("msedgewebview2.exe", StringComparison.OrdinalIgnoreCase) == true) return;

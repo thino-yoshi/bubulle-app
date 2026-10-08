@@ -56,7 +56,7 @@ public sealed class SettingsWindow : Window
 {
     private readonly AppSettings _s;
     private readonly HotkeyBox _mainHotkey;
-    private readonly CheckBox _perBubble, _autoHide, _startup;
+    private readonly CheckBox _perBubble, _autoHide, _startup, _preload;
     private readonly ComboBox _screen;
     private readonly Slider _opacity, _width, _height;
     private readonly List<(BubbleConfig bubble, HotkeyBox box, Slider opacity)> _rows = new();
@@ -85,7 +85,13 @@ public sealed class SettingsWindow : Window
         _height = MakeSlider(20, 95, _s.DefaultHeightPct);
         root.Children.Add(Row("Hauteur par défaut (% de l'écran)", SliderWithValue(_height, "%")));
         _autoHide = new CheckBox { Content = "Cacher la fenêtre quand je clique ailleurs (ex. retour au jeu)", IsChecked = _s.AutoHide, Margin = new Thickness(0, 8, 0, 0) };
+        _preload = new CheckBox
+        {
+            Content = "Garder les sites web connectés en arrière-plan (pastilles de messages dès le démarrage)",
+            IsChecked = _s.PreloadWeb, Margin = new Thickness(0, 8, 0, 0),
+        };
         root.Children.Add(_autoHide);
+        root.Children.Add(_preload);
         _screen = new ComboBox { Width = 260 };
         var screens = System.Windows.Forms.Screen.AllScreens;
         var currentScreen = Screens.Current(_s).DeviceName;
@@ -177,6 +183,7 @@ public sealed class SettingsWindow : Window
         _s.DefaultWidthPct = (int)_width.Value;
         _s.DefaultHeightPct = (int)_height.Value;
         _s.AutoHide = _autoHide.IsChecked == true;
+        _s.PreloadWeb = _preload.IsChecked == true;
         _s.StartWithWindows = _startup.IsChecked == true;
         if (_screen.SelectedItem is ComboBoxItem { Tag: string device }) _s.Screen = device;
         _s.PerBubbleHotkeys = _perBubble.IsChecked == true;

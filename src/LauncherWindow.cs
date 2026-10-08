@@ -25,6 +25,7 @@ public sealed class LauncherWindow : Window
     private static readonly Brush AccentBrush = Frozen(new SolidColorBrush(Accent));
     private static readonly Brush BubbleFill = Frozen(new SolidColorBrush(Color.FromArgb(0xE0, 0x16, 0x1A, 0x22)));
     private static readonly Brush RingBrush = Frozen(new SolidColorBrush(Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF)));
+    private static readonly Brush BadgeBrush = Frozen(new SolidColorBrush(Color.FromRgb(0xF2, 0x3F, 0x43)));
 
     private readonly AppController _c;
     private readonly Canvas _canvas = new();
@@ -104,6 +105,7 @@ public sealed class LauncherWindow : Window
             menu.Items.Add(remove);
             v.ContextMenu = menu;
             _apps.Add(v);
+            v.SetBadge(_badgeCounts.TryGetValue(b, out var count) ? count : 0);
         }
         _plus = new BubbleVisual(PlusSize, null, "+") { ToolTip = "Ajouter une application" };
         _plus.MouseLeftButtonUp += (_, _) => _c.ToggleSearch();
@@ -152,6 +154,37 @@ public sealed class LauncherWindow : Window
                 if (!IsOpen) target.Visibility = Visibility.Hidden;
             });
         }
+    }
+
+    private readonly Dictionary<BubbleConfig, int> _badgeCounts = new();
+    private Border? _mainBadge;
+
+    /// <summary>Pastille de non-lus sur une bulle ; la bulle principale affiche le total de toutes les bulles.</summary>
+    public void SetBadge(BubbleConfig bubble, int count, int total)
+    {
+        _badgeCounts[bubble] = count;
+        int i = _c.Settings.Bubbles.IndexOf(bubble);
+        if (i >= 0 && i < _apps.Count) _apps[i].SetBadge(count);
+        UpdateBadge(_mainBadge, total);
+    }
+
+    internal static Border MakeBadge()
+    {
+        var text = new TextBlock { Foreground = Brushes.White, FontSize = 10.5, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        return new Border
+        {
+            Background = BadgeBrush, BorderBrush = Brushes.White, BorderThickness = new Thickness(1.5),
+            CornerRadius = new CornerRadius(9), MinWidth = 18, Height = 18, Padding = new Thickness(4, 0, 4, 0),
+            HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(0, -3, -5, 0), Child = text, Visibility = Visibility.Collapsed, IsHitTestVisible = false,
+        };
+    }
+
+    internal static void UpdateBadge(Border? badge, int count)
+    {
+        if (badge == null) return;
+        badge.Visibility = count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        ((TextBlock)badge.Child).Text = count > 99 ? "99+" : count.ToString();
     }
 
     public void SetActive(BubbleConfig? bubble)
@@ -213,6 +246,8 @@ public sealed class LauncherWindow : Window
         g.Children.Add(new Ellipse { Fill = AccentBrush });
         g.Children.Add(new Ellipse { Stroke = Brushes.White, StrokeThickness = 2.5, Margin = new Thickness(3) });
         g.Children.Add(new Ellipse { Fill = Brushes.White, Width = 16, Height = 16 });
+        _mainBadge = MakeBadge();
+        g.Children.Add(_mainBadge);
         g.RenderTransformOrigin = new Point(0.5, 0.5);
         g.RenderTransform = new ScaleTransform(1, 1);
         g.MouseEnter += (_, _) => BubbleVisual.Scale(g, 1.08);
@@ -326,10 +361,16 @@ public sealed class LauncherWindow : Window
             Children.Add(_content);
             _ring = new Ellipse { Stroke = RingBrush, StrokeThickness = 1.2 };
             Children.Add(_ring);
+            _badge = MakeBadge();
+            Children.Add(_badge);
 
             MouseEnter += (_, _) => Scale(this, 1.1);
             MouseLeave += (_, _) => Scale(this, 1);
         }
+
+        private readonly Border _badge;
+
+        public void SetBadge(int count) => UpdateBadge(_badge, count);
 
         public void SetActive(bool active)
         {
