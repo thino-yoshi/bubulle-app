@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -262,6 +263,7 @@ public sealed class LauncherWindow : Window
             v.ContextMenu = menu;
             _apps.Add(v);
             v.SetBadge(_badgeCounts.TryGetValue(b, out var count) ? count : 0);
+            if (_progress.TryGetValue(b, out var p)) v.SetProgress(p);
         }
         _plus = new BubbleVisual(PlusSize, null, "+") { ToolTip = "Ajouter une application" };
         _plus.MouseLeftButtonUp += (_, _) => _c.ToggleSearch();
@@ -337,6 +339,48 @@ public sealed class LauncherWindow : Window
             HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top,
             Margin = new Thickness(0, -3, -5, 0), Child = text, Visibility = Visibility.Collapsed, IsHitTestVisible = false,
         };
+    }
+
+    // ---------- Jauges de téléchargement ----------
+
+    private static readonly Brush ProgressBrush = Frozen(new SolidColorBrush(Color.FromRgb(0x5C, 0xE0, 0x8A)));
+    private readonly Dictionary<BubbleConfig, double> _progress = new();
+    private Ellipse? _mainProgress;
+
+    /// <summary>Anneau de progression : un trait vert qui fait le tour de la bulle selon le pourcentage.</summary>
+    internal static Ellipse? UpdateProgressRing(Grid host, Ellipse? ring, double? value, double size)
+    {
+        if (value == null)
+        {
+            if (ring != null) host.Children.Remove(ring);
+            return null;
+        }
+        const double thickness = 3.5;
+        double perimeter = Math.PI * (size + 4 - thickness) / thickness;
+        if (ring == null)
+        {
+            ring = new Ellipse
+            {
+                Stroke = ProgressBrush, StrokeThickness = thickness, StrokeDashCap = PenLineCap.Round,
+                Margin = new Thickness(-2), IsHitTestVisible = false,
+                RenderTransformOrigin = new Point(0.5, 0.5), RenderTransform = new RotateTransform(-90),
+            };
+            host.Children.Add(ring);
+        }
+        double filled = Math.Clamp(value.Value, 0, 1) * perimeter;
+        ring.StrokeDashArray = new DoubleCollection { Math.Max(0.01, filled), perimeter + 1 };
+        return ring;
+    }
+
+    /// <summary>Progression des téléchargements par bulle ; la bulle principale montre le plus avancé.</summary>
+    public void SetProgress(Dictionary<BubbleConfig, double> progress)
+    {
+        _progress.Clear();
+        foreach (var kv in progress) _progress[kv.Key] = kv.Value;
+        var list = _c.Settings.Bubbles;
+        for (int i = 0; i < _apps.Count && i < list.Count; i++)
+            _apps[i].SetProgress(_progress.TryGetValue(list[i], out var v) ? v : null);
+        _mainProgress = UpdateProgressRing(_main, _mainProgress, _progress.Count > 0 ? _progress.Values.Max() : null, MainSize);
     }
 
     /// <summary>Valeur de pastille « point » : de l'activité, sans nombre connu (apps de bureau).</summary>
@@ -538,6 +582,11 @@ public sealed class LauncherWindow : Window
         private Ellipse? _holdRing;
 
         public void SetBadge(int count) => UpdateBadge(_badge, count);
+
+        private Ellipse? _progressRing;
+
+        /// <summary>Anneau vert de téléchargement (0 à 1), ou null pour le retirer.</summary>
+        public void SetProgress(double? value) => _progressRing = UpdateProgressRing(this, _progressRing, value, Width);
 
         /// <summary>Anneau bleu clair qui se remplit autour de la bulle pendant l'appui long.</summary>
         public void StartHoldRing(TimeSpan duration)

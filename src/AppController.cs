@@ -81,6 +81,8 @@ public sealed class AppController : IDisposable
         if (Settings.StartWithWindows) ApplyStartup();
 
         _badgeTimer.Tick += (_, _) => PollAppBadges();
+        _downloadTimer.Tick += async (_, _) => await PollDownloads();
+        _downloadTimer.Start();
         _badgeTimer.Start();
 
         // Apps de bureau : Windows prévient quand une fenêtre fait clignoter son bouton (nouveau message).
@@ -930,6 +932,53 @@ public sealed class AppController : IDisposable
         }
     }
 
+    // ---------- Jauges de téléchargement ----------
+
+    private readonly DownloadMonitor _downloads = new();
+    private readonly System.Windows.Threading.DispatcherTimer _downloadTimer = new() { Interval = TimeSpan.FromSeconds(3) };
+    private readonly Dictionary<string, string> _launcherAppProcess = new(StringComparer.OrdinalIgnoreCase);
+    private bool _pollingDownloads;
+
+    /// <summary>Lit les téléchargements en arrière-plan, puis remplit l'anneau des bulles concernées.</summary>
+    private async Task PollDownloads()
+    {
+        if (_pollingDownloads || _disposed) return;
+        _pollingDownloads = true;
+        try
+        {
+            var byProcess = await Task.Run(_downloads.Poll);
+            var perBubble = new Dictionary<BubbleConfig, double>();
+            foreach (var b in Settings.Bubbles)
+            {
+                // Bulle de l'app elle-même (Chrome, Steam…), ou lanceur qui contient l'app.
+                var processes = b.IsLauncher ? b.Apps.Select(LauncherAppProcess) : new[] { b.ProcessName };
+                double best = -1;
+                foreach (var p in processes)
+                    if (!string.IsNullOrEmpty(p) && byProcess.TryGetValue(p, out var v)) best = Math.Max(best, v);
+                if (best >= 0) perBubble[b] = best;
+            }
+            _launcher.SetProgress(perBubble);
+        }
+        catch (Exception ex)
+        {
+            App.Log(ex);
+        }
+        finally
+        {
+            _pollingDownloads = false;
+        }
+    }
+
+    /// <summary>Nom du programme d'une app de lanceur (lu une fois depuis son raccourci).</summary>
+    private string LauncherAppProcess(LauncherApp app)
+    {
+        if (app.Kind == "Web" || string.IsNullOrEmpty(app.LaunchPath)) return "";
+        if (_launcherAppProcess.TryGetValue(app.LaunchPath, out var cached)) return cached;
+        var process = AppCatalog.FromFile(app.LaunchPath)?.ProcessName ?? "";
+        _launcherAppProcess[app.LaunchPath] = process;
+        return process;
+    }
+
     private Forms.NotifyIcon CreateTray()
     {
         var menu = new Forms.ContextMenuStrip();
@@ -1003,6 +1052,7 @@ public sealed class AppController : IDisposable
         foreach (var frame in _frames.Values) frame.DisposeContent();
         _hotkeys.Dispose();
         _badgeTimer.Stop();
+        _downloadTimer.Stop();
         Native.DeregisterShellHookWindow(new WindowInteropHelper(_launcher).Handle);
         Native.UnhookWinEvent(_foregroundHook);
         SystemEvents.DisplaySettingsChanged -= OnDisplayChanged;

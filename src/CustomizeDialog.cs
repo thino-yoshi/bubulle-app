@@ -134,7 +134,13 @@ public sealed class CustomizeDialog : Window
             BorderBrush = selected ? Accent : Brushes.Transparent, BorderThickness = new Thickness(1.5),
             Cursor = Cursors.Hand, ToolTip = tooltip, Child = content,
         };
-        tile.MouseLeftButtonUp += (_, _) => { pick(); RenderIcons(bubble); };
+        // Au clic (appui) et pas au relâchement : sinon le déplacement de la fenêtre « mange » le clic.
+        tile.MouseLeftButtonDown += (_, e) =>
+        {
+            e.Handled = true;
+            pick();
+            RenderIcons(bubble);
+        };
         return tile;
     }
 
