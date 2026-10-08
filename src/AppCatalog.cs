@@ -54,48 +54,26 @@ public static class AppCatalog
 
     private static List<AppEntry> Scan()
     {
+        // Menu Démarrer (avec sous-dossiers) + raccourcis du bureau.
         var dirs = new[]
         {
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonStartMenu), "Programs"),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.StartMenu), "Programs"),
+            (Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonStartMenu), "Programs"), true),
+            (Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.StartMenu), "Programs"), true),
+            (Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), false),
+            (Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory), false),
         };
-        var shellType = Type.GetTypeFromProgID("WScript.Shell");
-        dynamic? shell = shellType != null ? Activator.CreateInstance(shellType) : null;
         var byName = new Dictionary<string, AppEntry>(StringComparer.OrdinalIgnoreCase);
-        var options = new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true };
 
-        foreach (var dir in dirs.Where(Directory.Exists))
+        foreach (var (dir, recurse) in dirs)
         {
+            if (!Directory.Exists(dir)) continue;
+            var options = new EnumerationOptions { RecurseSubdirectories = recurse, IgnoreInaccessible = true };
             foreach (var file in Directory.EnumerateFiles(dir, "*.lnk", options))
             {
                 var name = Path.GetFileNameWithoutExtension(file);
                 if (byName.ContainsKey(name) || IsJunk(name)) continue;
-
-                string target = "", args = "", iconPath = "";
-                int iconIndex = 0;
-                try
-                {
-                    var sc = shell!.CreateShortcut(file);
-                    target = (string)sc.TargetPath;
-                    args = (string)sc.Arguments;
-                    (iconPath, iconIndex) = ParseIconLocation((string)sc.IconLocation);
-                }
-                catch
-                {
-                    // Raccourci illisible : on garde quand même l'entrée, lancée via le .lnk.
-                }
-
-                // Les raccourcis vers des documents (.chm, .url, .txt…) ne sont pas des applications.
-                if (target.Length > 0 && !target.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) continue;
-
-                byName[name] = new AppEntry
-                {
-                    Name = name,
-                    LaunchPath = file,
-                    ProcessName = ProcessNameFor(target, args),
-                    IconPath = iconPath.Length > 0 ? iconPath : target,
-                    IconIndex = iconPath.Length > 0 ? iconIndex : 0,
-                };
+                var entry = FromShortcut(file);
+                if (entry != null) byName[name] = entry;
             }
         }
 
@@ -111,8 +89,70 @@ public static class AppCatalog
             };
         }
 
-        if (shell != null) Marshal.FinalReleaseComObject(shell);
         return byName.Values.OrderBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+    }
+
+    /// <summary>Une app à partir d'un fichier choisi par toi : un programme (.exe) ou un raccourci (.lnk).</summary>
+    public static AppEntry? FromFile(string path) =>
+        path.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase) ? FromShortcut(path) : FromExe(path);
+
+    public static AppEntry FromExe(string exePath) => new()
+    {
+        Name = FriendlyName(exePath),
+        LaunchPath = exePath,
+        ProcessName = Path.GetFileNameWithoutExtension(exePath),
+        IconPath = exePath,
+    };
+
+    /// <summary>Nom affiché d'un programme : sa description (« Google Chrome ») plutôt que « chrome.exe ».</summary>
+    public static string FriendlyName(string exePath)
+    {
+        try
+        {
+            var info = System.Diagnostics.FileVersionInfo.GetVersionInfo(exePath);
+            foreach (var candidate in new[] { info.FileDescription, info.ProductName })
+                if (!string.IsNullOrWhiteSpace(candidate)) return candidate.Trim();
+        }
+        catch
+        {
+            // Pas d'informations de version : on garde le nom du fichier.
+        }
+        return Path.GetFileNameWithoutExtension(exePath);
+    }
+
+    private static AppEntry? FromShortcut(string lnkPath)
+    {
+        string target = "", args = "", iconPath = "";
+        int iconIndex = 0;
+        dynamic? shell = null;
+        try
+        {
+            shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell")!);
+            var sc = shell!.CreateShortcut(lnkPath);
+            target = (string)sc.TargetPath;
+            args = (string)sc.Arguments;
+            (iconPath, iconIndex) = ParseIconLocation((string)sc.IconLocation);
+        }
+        catch
+        {
+            // Raccourci illisible : on garde quand même l'entrée, lancée via le .lnk.
+        }
+        finally
+        {
+            if (shell != null) Marshal.FinalReleaseComObject(shell);
+        }
+
+        // Les raccourcis vers des documents (.chm, .url, .txt…) ne sont pas des applications.
+        if (target.Length > 0 && !target.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) return null;
+
+        return new AppEntry
+        {
+            Name = Path.GetFileNameWithoutExtension(lnkPath),
+            LaunchPath = lnkPath,
+            ProcessName = ProcessNameFor(target, args),
+            IconPath = iconPath.Length > 0 ? iconPath : target,
+            IconIndex = iconPath.Length > 0 ? iconIndex : 0,
+        };
     }
 
     private static bool IsJunk(string name)

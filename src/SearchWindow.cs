@@ -13,7 +13,7 @@ namespace Bulles;
 public sealed class SearchWindow : Window
 {
     private const double PanelWidth = 300;
-    private const int MaxResults = 6;
+    private const int MaxResults = 8;
 
     private readonly TextBox _box;
     private readonly TextBlock _placeholder;
@@ -23,6 +23,7 @@ public sealed class SearchWindow : Window
     private readonly bool _growsUp;
     private readonly double _anchorY;
     private List<AppEntry> _all = new();
+    private List<AppEntry> _open = new();
     private bool _closing;
 
     public event Action<AppEntry>? Picked;
@@ -81,8 +82,10 @@ public sealed class SearchWindow : Window
             BorderThickness = new Thickness(0),
             Foreground = white,
             Margin = new Thickness(0, 6, 0, 0),
+            MaxHeight = 420,
         };
         ScrollViewer.SetHorizontalScrollBarVisibility(_list, ScrollBarVisibility.Disabled);
+        ScrollViewer.SetVerticalScrollBarVisibility(_list, ScrollBarVisibility.Auto);
 
         var stack = new StackPanel();
         stack.Children.Add(boxHost);
@@ -108,6 +111,7 @@ public sealed class SearchWindow : Window
         {
             Activate();
             _box.Focus();
+            _open = WindowFinder.OpenAppPaths().Select(AppCatalog.FromExe).ToList();
             Refresh();
             _all = await AppCatalog.GetAsync() ?? new List<AppEntry>();
             Refresh();
@@ -131,26 +135,33 @@ public sealed class SearchWindow : Window
         var url = WebPresets.AsUrl(q);
         if (url != null && !web.Any(w => w.Url == url))
             web.Insert(0, new AppEntry { Kind = "Web", Name = WebPresets.HostOf(url), Url = url });
-        var apps = Filter(_all, q).Take(MaxResults - Math.Min(web.Count, 3)).ToList();
+        var open = Filter(_open, q).Take(5).ToList();
+        var apps = Filter(_all, q).Take(MaxResults).ToList();
 
         _list.Items.Clear();
-        if (web.Count > 0)
-        {
-            _list.Items.Add(SectionHeader("Web · il reste juste à se connecter"));
-            foreach (var app in web) _list.Items.Add(MakeItem(app));
-        }
-        if (apps.Count > 0)
-        {
-            _list.Items.Add(SectionHeader("Applications du PC"));
-            foreach (var app in apps) _list.Items.Add(MakeItem(app));
-        }
-        _list.SelectedIndex = _list.Items.Count > 1 ? 1 : -1;
+        AddSection("Web · il reste juste à se connecter", web);
+        AddSection("Fenêtres ouvertes", open);
+        AddSection("Applications du PC", apps);
+        // Toujours proposé : n'importe quel programme ou raccourci du PC, même absent des listes.
+        _list.Items.Add(MakeItem(BrowseEntry));
+        _list.SelectedIndex = -1;
+        Move(+1);
 
         bool loading = _all.Count == 0 && !AppCatalog.GetAsync().IsCompleted;
-        bool empty = web.Count == 0 && apps.Count == 0;
+        bool empty = web.Count == 0 && open.Count == 0 && apps.Count == 0;
         _status.Text = loading ? "Chargement des applications…" : "Aucune app trouvée";
         _status.Visibility = loading || empty ? Visibility.Visible : Visibility.Collapsed;
     }
+
+    private void AddSection(string title, List<AppEntry> entries)
+    {
+        if (entries.Count == 0) return;
+        _list.Items.Add(SectionHeader(title));
+        foreach (var app in entries) _list.Items.Add(MakeItem(app));
+    }
+
+    /// <summary>Entrée spéciale « Parcourir… » : ouvre le sélecteur de fichiers.</summary>
+    public static readonly AppEntry BrowseEntry = new() { Kind = "Browse", Name = "Parcourir… (un programme ou un raccourci)" };
 
     private IEnumerable<AppEntry> Filter(IEnumerable<AppEntry> source, string q)
     {
@@ -181,7 +192,7 @@ public sealed class SearchWindow : Window
         else
             row.Children.Add(new TextBlock
             {
-                Text = app.IsWeb ? "" : "",
+                Text = app.Kind == "Browse" ? "" : app.IsWeb ? "" : "",
                 FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),
                 FontSize = 16, Width = 20, Margin = new Thickness(0, 0, 10, 0), VerticalAlignment = VerticalAlignment.Center,
             });

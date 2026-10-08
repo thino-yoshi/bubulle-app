@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 
 namespace Bulles;
 
@@ -38,16 +39,42 @@ public static class WindowFinder
         return best;
     }
 
-    private static bool IsCandidate(IntPtr h, string processName)
+    /// <summary>Apps qui ont une fenêtre ouverte en ce moment (une entrée par programme), pour en faire des bulles.</summary>
+    public static List<string> OpenAppPaths()
+    {
+        var ourPid = (uint)Environment.ProcessId;
+        var paths = new List<string>();
+        Native.EnumWindows((h, _) =>
+        {
+            if (!IsAppWindow(h) || Native.ProcessId(h) == ourPid) return true;
+            var path = Native.ProcessPath(h);
+            if (path == null || paths.Contains(path, StringComparer.OrdinalIgnoreCase)) return true;
+            var exe = Path.GetFileNameWithoutExtension(path);
+            // Le bureau et la barre des tâches appartiennent aussi à explorer ; les apps du Store passent
+            // par ApplicationFrameHost et ne peuvent pas être mises dans une bulle.
+            if (exe.Equals("explorer", StringComparison.OrdinalIgnoreCase) && Native.ClassName(h) != "CabinetWClass") return true;
+            if (exe.Equals("ApplicationFrameHost", StringComparison.OrdinalIgnoreCase)) return true;
+            paths.Add(path);
+            return true;
+        }, IntPtr.Zero);
+        return paths;
+    }
+
+    /// <summary>Fenêtre principale « normale » d'une app : visible, avec un titre, pas un outil ni un popup.</summary>
+    private static bool IsAppWindow(IntPtr h)
     {
         if (!Native.IsWindow(h) || !Native.IsWindowVisible(h)) return false;
         if (Native.GetWindow(h, Native.GW_OWNER) != IntPtr.Zero) return false;
         if (Native.GetWindowTextLength(h) == 0) return false;
         if ((Native.GetExStyle(h) & Native.WS_EX_TOOLWINDOW) != 0) return false;
         if (Native.DwmGetWindowAttribute(h, Native.DWMWA_CLOAKED, out int cloaked, sizeof(int)) == 0 && cloaked != 0) return false;
+        return !IgnoredClasses.Contains(Native.ClassName(h));
+    }
 
+    private static bool IsCandidate(IntPtr h, string processName)
+    {
+        if (!IsAppWindow(h)) return false;
         var cls = Native.ClassName(h);
-        if (IgnoredClasses.Contains(cls)) return false;
 
         var path = Native.ProcessPath(h);
         if (path == null || !Path.GetFileNameWithoutExtension(path).Equals(processName, StringComparison.OrdinalIgnoreCase)) return false;

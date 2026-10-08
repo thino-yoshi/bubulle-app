@@ -324,13 +324,43 @@ public sealed class AppController : IDisposable
         double left = Settings.IsLeft ? stripRight - 6 : stripLeft + 6 - width;
 
         _search = new SearchWindow(IsAlreadyBubble, left, down ? top - 8 : bottom + 8, growsUp: !down);
-        _search.Picked += app => _ = AddBubble(app);
+        _search.Picked += app =>
+        {
+            if (app.Kind == "Browse") _launcher.Dispatcher.BeginInvoke(BrowseForApp);
+            else _ = AddBubble(app);
+        };
         _search.Closed += (_, _) =>
         {
             _search = null;
             _searchClosedAt = DateTime.Now;
         };
         _search.Show();
+    }
+
+    /// <summary>Ajoute n'importe quel programme (.exe) ou raccourci du PC, même absent du menu Démarrer.</summary>
+    private void BrowseForApp()
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Choisir une application pour une nouvelle bulle",
+            Filter = "Programmes et raccourcis (*.exe, *.lnk)|*.exe;*.lnk",
+            InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+            DereferenceLinks = false,
+        };
+        if (dialog.ShowDialog() != true) return;
+
+        var app = AppCatalog.FromFile(dialog.FileName);
+        if (app == null)
+        {
+            Notify("Ce raccourci ne mène pas à un programme.");
+            return;
+        }
+        if (IsAlreadyBubble(app))
+        {
+            Notify($"{app.Name} a déjà sa bulle.");
+            return;
+        }
+        _ = AddBubble(app);
     }
 
     private bool IsAlreadyBubble(AppEntry app) =>
