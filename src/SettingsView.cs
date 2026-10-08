@@ -133,28 +133,29 @@ public sealed class SettingsView : UserControl
         }
         Refresh();
 
-        var capture = new Button { Content = "Capturer depuis un jeu", Style = Theme.AccentButton };
+        var capture = new Button { Content = "Récupérer le curseur du jeu", Style = Theme.AccentButton };
         var choose = new Button { Content = "Choisir un fichier…", Style = Theme.Button, Margin = new Thickness(8, 0, 0, 0) };
         capture.Click += async (_, _) =>
         {
             capture.IsEnabled = false;
             for (int s = 5; s > 0; s--)
             {
-                status.Text = $"Passe sur ton jeu et laisse la souris dessus… {s}";
+                status.Text = $"Passe sur ton jeu (clique une fois dedans)… {s}";
                 await System.Threading.Tasks.Task.Delay(1000);
             }
-            status.Text = "Capture en cours… bouge un peu la souris sur le jeu.";
-            var (result, path) = await AppCursor.CaptureBestAsync(TimeSpan.FromSeconds(2));
+            status.Text = "Bouge doucement la souris sur différentes zones du jeu pendant 6 secondes…";
+            _c.Announce("Bouge doucement la souris sur différentes zones du jeu pendant 6 secondes.");
+            var (path, message) = await GameCursorFinder.RecoverAsync();
             capture.IsEnabled = true;
-            if (result != AppCursor.CaptureResult.Captured || path == null)
+            _c.Announce(message);
+            if (path == null)
             {
-                status.Text = result == AppCursor.CaptureResult.StandardArrow
-                    ? "C'était la flèche normale de Windows : la souris n'était pas sur le jeu, ou le jeu n'a pas de curseur à lui. Réessaie."
-                    : "Ce jeu dessine lui-même son curseur dans son image : Windows n'en voit aucun, impossible de le copier. Utilise « Choisir un fichier… » avec un .cur ou .ani.";
+                status.Text = message;
                 return;
             }
             _s.CursorPath = path;
             _s.UseCustomCursor = true;
+            AskCursorScope();
             _s.Save();
             AppCursor.Apply(_s);
             Build();
@@ -165,6 +166,7 @@ public sealed class SettingsView : UserControl
             if (dialog.ShowDialog() != true) return;
             _s.CursorPath = dialog.FileName;
             _s.UseCustomCursor = true;
+            AskCursorScope();
             _s.Save();
             AppCursor.Apply(_s);
             Build();
@@ -187,7 +189,37 @@ public sealed class SettingsView : UserControl
             _s.Save();
             AppCursor.Apply(_s);
         }, step: 10));
+
+        // Où utiliser le curseur : Bubulle seulement (et ses apps), ou tout le PC.
+        var scope = new WrapPanel();
+        foreach (var (label, value) in new[] { ("Seulement Bubulle", "Bubulle"), ("Partout sur le PC", "System") })
+        {
+            var pill = Pill(label, _s.CursorScope == value);
+            pill.Click += (_, _) =>
+            {
+                _s.CursorScope = value;
+                _s.Save();
+                AppCursor.Apply(_s);
+                Build();
+            };
+            scope.Children.Add(pill);
+        }
+        Add(card, Row("Où utiliser mon curseur", "« Seulement Bubulle » inclut les apps et sites ouverts dans les bulles. « Partout » remplace la flèche de Windows (ta flèche d'origine revient si tu changes d'avis).", scope));
         _root.Children.Add(card.Border);
+    }
+
+    /// <summary>Après avoir récupéré ou choisi un curseur : on demande où l'utiliser.</summary>
+    private void AskCursorScope()
+    {
+        var dialog = new ChoiceDialog(
+            "Où utiliser ce curseur ?",
+            "Tu pourras changer d'avis à tout moment dans Paramètres → Curseur.",
+            "Seulement dans Bubulle", "Partout sur le PC",
+            "Bubulle, ses bulles, et les apps et sites ouverts dedans.",
+            "Remplace la flèche de Windows partout. Ta flèche d'origine revient si tu changes d'avis.");
+        dialog.ShowDialog();
+        if (dialog.Result == 1) _s.CursorScope = "Bubulle";
+        else if (dialog.Result == 2) _s.CursorScope = "System";
     }
 
     private void BuildHotkeys()

@@ -84,6 +84,12 @@ public class AppSettings
     public string CursorPath { get; set; } = "";
     /// <summary>Taille du curseur perso, en % de sa taille d'origine.</summary>
     public int CursorScale { get; set; } = 100;
+    /// <summary>« Bubulle » (Bubulle et les apps dans ses bulles) ou « System » (tout le PC).</summary>
+    public string CursorScope { get; set; } = "Bubulle";
+    public bool CursorEverywhere => CursorScope == "System";
+    /// <summary>Flèche Windows d'origine, pour la remettre quand on arrête « Partout sur le PC ».</summary>
+    public string PreviousArrow { get; set; } = "";
+    public bool SystemCursorApplied { get; set; }
 
     /// <summary>Sons d'interface : déploiement / repli des bulles.</summary>
     public bool SoundEnabled { get; set; } = true;

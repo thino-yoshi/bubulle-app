@@ -544,7 +544,6 @@ public sealed class BubbleFrame : Window
         _web = new WebView2CompositionControl { DefaultBackgroundColor = System.Drawing.Color.FromArgb(0x12, 0x15, 0x1C), UseLayoutRounding = true };
         RenderOptions.SetBitmapScalingMode(_web, BitmapScalingMode.NearestNeighbor);
         _host.Child = _web;
-        AppCursor.SuspendOver(_web);
         await _web.EnsureCoreWebView2Async(env);
         var core = _web.CoreWebView2;
         core.NewWindowRequested += (_, e) =>

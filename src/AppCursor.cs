@@ -50,8 +50,124 @@ public static class AppCursor
                 App.Log(ex);
             }
         }
-        // Mouse.OverrideCursor ne vaut que pour les fenêtres de Bulles : ailleurs, Windows garde son curseur.
+        // Mouse.OverrideCursor ne vaut que pour les fenêtres de Bubulle : ailleurs, Windows garde son curseur.
         Mouse.OverrideCursor = Current;
+
+        // Copie brute du curseur, pour le prêter à Windows (tout le PC, ou au-dessus des apps des bulles).
+        if (_raw != IntPtr.Zero) DestroyCursor(_raw);
+        _raw = Current != null ? LoadRaw(s.CursorPath, s.CursorScale) : IntPtr.Zero;
+        TemporarySystemCursor(false);
+        // Premier passage : si Bubulle avait été arrêté brutalement pendant un survol, la flèche de Windows
+        // était restée remplacée. On recharge les curseurs normaux.
+        if (!_startupReset)
+        {
+            _startupReset = true;
+            SystemParametersInfo(SPI_SETCURSORS, 0, IntPtr.Zero, 0);
+        }
+        if (s.UseCustomCursor && s.CursorEverywhere && _raw != IntPtr.Zero) ApplySystemWide(s);
+        else RemoveSystemWide(s);
+    }
+
+    // ---------- Curseur prêté à Windows ----------
+
+    [DllImport("user32.dll")] private static extern bool SetSystemCursor(IntPtr cursor, uint id);
+    [DllImport("user32.dll")] private static extern bool SystemParametersInfo(uint action, uint param, IntPtr pv, uint winIni);
+    private const uint OCR_NORMAL = 32512, SPI_SETCURSORS = 0x57, SPIF_UPDATEINIFILE = 1, SPIF_SENDCHANGE = 2;
+    private const string CursorsKey = @"Control Panel\Cursors";
+
+    private static IntPtr _raw;
+    private static bool _temporary, _startupReset;
+
+    private static string SystemCursorPath => Path.Combine(AppSettings.Dir, "cursor-windows.cur");
+
+    /// <summary>
+    /// « Partout sur le PC » : ton curseur devient la flèche de Windows (comme un thème de curseur, gardé au
+    /// redémarrage). La flèche d'origine est notée pour pouvoir la remettre.
+    /// </summary>
+    private static void ApplySystemWide(AppSettings s)
+    {
+        try
+        {
+            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(CursorsKey, writable: true);
+            if (key == null) return;
+            if (!s.SystemCursorApplied) s.PreviousArrow = key.GetValue("Arrow") as string ?? "";
+            // Fichier à la bonne taille (la taille réglée dans Bubulle).
+            using (var icon = System.Drawing.Icon.FromHandle(_raw))
+            using (var bitmap = icon.ToBitmap())
+            {
+                GetIconInfo(_raw, out var ii);
+                DeleteObject(ii.hbmMask);
+                DeleteObject(ii.hbmColor);
+                SaveCursorTo(SystemCursorPath, bitmap, ii.xHotspot, ii.yHotspot);
+            }
+            key.SetValue("Arrow", SystemCursorPath, Microsoft.Win32.RegistryValueKind.ExpandString);
+            SystemParametersInfo(SPI_SETCURSORS, 0, IntPtr.Zero, SPIF_UPDATEINIFILE | SPIF_SENDCHANGE);
+            s.SystemCursorApplied = true;
+            s.Save();
+        }
+        catch (Exception ex)
+        {
+            App.Log(ex);
+        }
+    }
+
+    /// <summary>Remet la flèche de Windows d'origine (si Bubulle l'avait remplacée).</summary>
+    private static void RemoveSystemWide(AppSettings s)
+    {
+        if (!s.SystemCursorApplied) return;
+        try
+        {
+            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(CursorsKey, writable: true);
+            key?.SetValue("Arrow", s.PreviousArrow, Microsoft.Win32.RegistryValueKind.ExpandString);
+            SystemParametersInfo(SPI_SETCURSORS, 0, IntPtr.Zero, SPIF_UPDATEINIFILE | SPIF_SENDCHANGE);
+            s.SystemCursorApplied = false;
+            s.Save();
+        }
+        catch (Exception ex)
+        {
+            App.Log(ex);
+        }
+    }
+
+    /// <summary>
+    /// « Seulement Bubulle » : quand la souris passe au-dessus d'une vraie app rangée dans une bulle (Chrome…),
+    /// Windows reçoit le curseur le temps du survol, puis retrouve le sien.
+    /// </summary>
+    public static void TemporarySystemCursor(bool on)
+    {
+        if (on == _temporary) return;
+        if (on)
+        {
+            if (_raw == IntPtr.Zero) return;
+            // Windows détruit le curseur qu'on lui donne : on lui passe une copie.
+            SetSystemCursor(CopyIcon(_raw), OCR_NORMAL);
+        }
+        else
+        {
+            // Recharge les curseurs normaux de Windows (sans toucher à ses réglages).
+            SystemParametersInfo(SPI_SETCURSORS, 0, IntPtr.Zero, 0);
+        }
+        _temporary = on;
+    }
+
+    private static IntPtr LoadRaw(string path, int scalePercent)
+    {
+        var (w, h) = TargetSize(path, scalePercent);
+        return LoadImage(IntPtr.Zero, path, IMAGE_CURSOR, w, h, LR_LOADFROMFILE);
+    }
+
+    /// <summary>Taille d'origine lue dans l'en-tête du .cur (0 = 256 px), multipliée par le réglage de taille.</summary>
+    private static (int W, int H) TargetSize(string path, int scalePercent)
+    {
+        int w = 32, h = 32;
+        if (path.EndsWith(".cur", StringComparison.OrdinalIgnoreCase))
+        {
+            var header = new byte[8];
+            using (var f = File.OpenRead(path)) f.ReadExactly(header);
+            w = header[6] == 0 ? 256 : header[6];
+            h = header[7] == 0 ? 256 : header[7];
+        }
+        return (Math.Clamp(w * scalePercent / 100, 8, 256), Math.Clamp(h * scalePercent / 100, 8, 256));
     }
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
@@ -71,15 +187,9 @@ public static class AppCursor
     /// </summary>
     private static Cursor? LoadScaled(string path, int scalePercent)
     {
-        int size = 32;
-        if (path.EndsWith(".cur", StringComparison.OrdinalIgnoreCase))
-        {
-            var header = new byte[8];
-            using (var f = File.OpenRead(path)) f.ReadExactly(header);
-            size = header[6] == 0 ? 256 : header[6];
-        }
-        int target = Math.Clamp(size * scalePercent / 100, 8, 256);
-        var h = LoadImage(IntPtr.Zero, path, IMAGE_CURSOR, target, target, LR_LOADFROMFILE);
+        // Largeur et hauteur séparées : un curseur n'est pas toujours carré (sinon il serait déformé).
+        var (w, hgt) = TargetSize(path, scalePercent);
+        var h = LoadImage(IntPtr.Zero, path, IMAGE_CURSOR, w, hgt, LR_LOADFROMFILE);
         return h == IntPtr.Zero ? null : System.Windows.Interop.CursorInteropHelper.Create(new CursorHandle(h));
     }
 
@@ -99,13 +209,6 @@ public static class AppCursor
         {
             DestroyCursor(h);
         }
-    }
-
-    /// <summary>Le contenu d'une page web garde le curseur normal (main sur les liens, barre de texte).</summary>
-    public static void SuspendOver(System.Windows.FrameworkElement element)
-    {
-        element.MouseEnter += (_, _) => Mouse.OverrideCursor = null;
-        element.MouseLeave += (_, _) => Mouse.OverrideCursor = Current;
     }
 
     /// <summary>Copie le curseur affiché en ce moment (celui du jeu au premier plan). Retourne le chemin, ou null.</summary>
@@ -172,6 +275,18 @@ public static class AppCursor
         {
             Native.DestroyIcon(copy);
         }
+    }
+
+    /// <summary>Enregistre une image comme curseur de Bubulle (cursor.cur), avec son point de clic.</summary>
+    public static string SaveAsCursor(System.Drawing.Bitmap bitmap, int hotX, int hotY) => SaveCursorTo(CapturedPath, bitmap, hotX, hotY);
+
+    private static string SaveCursorTo(string path, System.Drawing.Bitmap bitmap, int hotX, int hotY)
+    {
+        using var png = new MemoryStream();
+        bitmap.Save(png, System.Drawing.Imaging.ImageFormat.Png);
+        Directory.CreateDirectory(AppSettings.Dir);
+        WriteCur(path, png.ToArray(), bitmap.Width, bitmap.Height, hotX, hotY);
+        return path;
     }
 
     /// <summary>Fichier .cur d'une seule image (PNG), avec son point de clic.</summary>

@@ -83,6 +83,10 @@ public sealed class AppController : IDisposable
         _badgeTimer.Tick += (_, _) => PollAppBadges();
         _downloadTimer.Tick += async (_, _) => await PollDownloads();
         _downloadTimer.Start();
+
+        // Curseur « seulement Bubulle » : aussi au-dessus des vraies apps rangées dans les bulles.
+        _cursorTimer.Tick += (_, _) => TrackCursorOverHostedApps();
+        _cursorTimer.Start();
         _badgeTimer.Start();
 
         // Apps de bureau : Windows prévient quand une fenêtre fait clignoter son bouton (nouveau message).
@@ -1006,6 +1010,25 @@ public sealed class AppController : IDisposable
         if (Updater.StartInstall()) Application.Current.Shutdown();
     }
 
+    // ---------- Curseur au-dessus des apps des bulles ----------
+
+    private readonly System.Windows.Threading.DispatcherTimer _cursorTimer = new() { Interval = TimeSpan.FromMilliseconds(100) };
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool GetCursorPos(out Native.POINT pt);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(Native.POINT pt);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr h, uint flags);
+
+    private void TrackCursorOverHostedApps()
+    {
+        bool over = false;
+        if (Settings.UseCustomCursor && !Settings.CursorEverywhere && AppCursor.Current != null && GetCursorPos(out var p))
+        {
+            var root = GetAncestor(WindowFromPoint(p), 2);
+            over = root != IntPtr.Zero && ((_current != null && _current.NativeHwnd == root) || _floating.Any(f => f.NativeHwnd == root));
+        }
+        AppCursor.TemporarySystemCursor(over);
+    }
+
     // ---------- Jauges de téléchargement ----------
 
     private readonly DownloadMonitor _downloads = new();
@@ -1116,6 +1139,9 @@ public sealed class AppController : IDisposable
         return System.Drawing.Icon.FromHandle(bmp.GetHicon());
     }
 
+    /// <summary>Petite notification Windows de Bubulle (utilisée par les paramètres).</summary>
+    public void Announce(string message) => Notify(message);
+
     private void Notify(string message)
     {
         _updateBalloonShown = false;
@@ -1146,6 +1172,8 @@ public sealed class AppController : IDisposable
         _hotkeys.Dispose();
         _badgeTimer.Stop();
         _downloadTimer.Stop();
+        _cursorTimer.Stop();
+        AppCursor.TemporarySystemCursor(false);
         Native.DeregisterShellHookWindow(new WindowInteropHelper(_launcher).Handle);
         Native.UnhookWinEvent(_foregroundHook);
         SystemEvents.DisplaySettingsChanged -= OnDisplayChanged;
