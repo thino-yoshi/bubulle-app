@@ -238,6 +238,24 @@ public sealed class SettingsView : UserControl
         buttons.Children.Add(folder);
         buttons.Children.Add(quit);
         Add(card, Padded(buttons));
+
+        // Mises à jour : vérifiées au démarrage ; bouton pour vérifier tout de suite ou installer.
+        var status = new TextBlock { Text = _c.UpdateStatus.Length > 0 ? _c.UpdateStatus : $"Version installée : v{Updater.Current}", Foreground = TextSoft, FontSize = 12, TextWrapping = TextWrapping.Wrap };
+        var update = new Button
+        {
+            Content = Updater.Ready != null ? $"Redémarrer pour installer v{Updater.Ready.Value.Version}" : "Rechercher une mise à jour",
+            Style = Updater.Ready != null ? Theme.AccentButton : Theme.Button,
+        };
+        update.Click += async (_, _) =>
+        {
+            if (Updater.Ready != null) { _c.InstallUpdateNow(); return; }
+            update.IsEnabled = false;
+            status.Text = "Recherche d'une mise à jour…";
+            await _c.CheckForUpdate(TimeSpan.Zero, quiet: true);
+            Build();
+        };
+        Add(card, Row("Mises à jour", "Vérifiées au démarrage sur GitHub ; tes réglages sont toujours gardés.", update));
+        Add(card, Padded(status));
         Add(card, Hint("Astuces : glisse la bulle principale pour la déplacer · appui long sur une bulle pour la ranger · clic droit pour la personnaliser."));
         _root.Children.Add(card.Border);
     }

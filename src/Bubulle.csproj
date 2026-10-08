@@ -11,6 +11,7 @@
     <AssemblyName>Bubulle</AssemblyName>
     <RootNamespace>Bulles</RootNamespace>
     <Version>0.0.3</Version>
+    <SatelliteResourceLanguages>fr;en</SatelliteResourceLanguages>
     <NoWarn>$(NoWarn);WFAC010</NoWarn>
   </PropertyGroup>
 

@@ -32,6 +32,16 @@ public partial class App : Application
             args.Handled = true;
         };
 
+        // Une mise à jour téléchargée la dernière fois ? On l'installe avant de démarrer (Bubulle se relance tout seul).
+        Updater.FindPending();
+        if (Updater.Ready != null && Updater.StartInstall())
+        {
+            _mutex.Dispose();
+            _mutex = null;
+            Shutdown();
+            return;
+        }
+
         _controller = new AppController(AppSettings.Load());
     }
 

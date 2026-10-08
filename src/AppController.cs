@@ -91,6 +91,7 @@ public sealed class AppController : IDisposable
         Native.RegisterShellHookWindow(launcherHwnd);
         HwndSource.FromHwnd(launcherHwnd)!.AddHook(ShellHook);
         if (Settings.PreloadWeb) _ = PreloadWebBubbles();
+        _ = CheckForUpdate(TimeSpan.FromSeconds(20), quiet: true);
     }
 
     // ---------- Pastilles de notification ----------
@@ -937,6 +938,55 @@ public sealed class AppController : IDisposable
         }
     }
 
+    // ---------- Mises à jour (GitHub) ----------
+
+    private Forms.ToolStripMenuItem? _updateMenuItem;
+    private bool _updateBalloonShown;
+
+    /// <summary>Texte d'état pour les paramètres.</summary>
+    public string UpdateStatus { get; private set; } = "";
+
+    /// <summary>Cherche une nouvelle version sur GitHub, la télécharge en silence, puis propose de redémarrer.</summary>
+    public async Task CheckForUpdate(TimeSpan delay, bool quiet)
+    {
+        await Task.Delay(delay);
+        if (_disposed) return;
+        UpdateStatus = "Recherche d'une mise à jour…";
+        try
+        {
+            var version = await Updater.CheckAndDownloadAsync();
+            if (version == null)
+            {
+                UpdateStatus = $"Bubulle est à jour (v{Updater.Current}).";
+                if (!quiet) Notify(UpdateStatus);
+                return;
+            }
+            UpdateStatus = $"Bubulle v{version} est prête : redémarre pour l'installer.";
+            if (_updateMenuItem == null)
+            {
+                _updateMenuItem = new Forms.ToolStripMenuItem($"Redémarrer pour mettre à jour (v{version})", null, (_, _) => InstallUpdateNow());
+                _tray.ContextMenuStrip!.Items.Insert(0, _updateMenuItem);
+            }
+            _updateBalloonShown = true;
+            _tray.ShowBalloonTip(8000, "Bubulle", $"La version {version} est prête. Clique ici pour redémarrer et l'installer (sinon, au prochain lancement).", Forms.ToolTipIcon.Info);
+        }
+        catch (Exception ex)
+        {
+            // Pas d'internet, GitHub indisponible… On réessaiera au prochain lancement.
+            App.Log(ex);
+            UpdateStatus = "Impossible de vérifier les mises à jour pour l'instant.";
+            if (!quiet) Notify(UpdateStatus);
+        }
+    }
+
+    /// <summary>Quitte Bubulle (en rendant les fenêtres gardées) et installe la mise à jour, qui relance l'app.</summary>
+    public void InstallUpdateNow()
+    {
+        if (Updater.Ready == null) return;
+        Dispose();
+        if (Updater.StartInstall()) Application.Current.Shutdown();
+    }
+
     // ---------- Jauges de téléchargement ----------
 
     private readonly DownloadMonitor _downloads = new();
@@ -1017,6 +1067,8 @@ public sealed class AppController : IDisposable
             Visible = true,
         };
         tray.DoubleClick += (_, _) => OpenSettings();
+        // Clic sur la notification « nouvelle version prête » : on installe.
+        tray.BalloonTipClicked += (_, _) => { if (_updateBalloonShown) InstallUpdateNow(); };
         return tray;
     }
 
@@ -1036,7 +1088,11 @@ public sealed class AppController : IDisposable
         return System.Drawing.Icon.FromHandle(bmp.GetHicon());
     }
 
-    private void Notify(string message) => _tray.ShowBalloonTip(4000, "Bubulle", message, Forms.ToolTipIcon.Info);
+    private void Notify(string message)
+    {
+        _updateBalloonShown = false;
+        _tray.ShowBalloonTip(4000, "Bubulle", message, Forms.ToolTipIcon.Info);
+    }
 
     private void OnDisplayChanged(object? sender, EventArgs e) =>
         _launcher.Dispatcher.BeginInvoke(() =>
