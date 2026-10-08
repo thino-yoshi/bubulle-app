@@ -90,9 +90,27 @@ public sealed class LauncherView : UserControl
 
         var tile = MakeTile(visual, app.Name, TextMain);
         tile.ToolTip = app.Name;
-        tile.MouseLeftButtonUp += (_, _) => Launch(app);
+        tile.Tag = app;
+        // Clic court : lancer. Appui long : la tuile se décroche et se range ailleurs dans la grille.
+        tile.MouseLeftButtonDown += (_, e) => BeginHold(tile, e);
+        tile.MouseMove += (_, e) => OnHoldMove(tile, e);
+        tile.MouseLeftButtonUp += (_, _) => EndHold(tile, app);
 
         var menu = new ContextMenu();
+        // Ranger l'app dans un autre lanceur.
+        var others = _c.Settings.Bubbles.Where(b => b.IsLauncher && b != _launcher).ToList();
+        if (others.Count > 0)
+        {
+            var move = new MenuItem { Header = "Déplacer vers" };
+            foreach (var other in others)
+            {
+                var target = other;
+                var item = new MenuItem { Header = target.Name };
+                item.Click += (_, _) => _c.MoveLauncherApp(app, _launcher, target);
+                move.Items.Add(item);
+            }
+            menu.Items.Add(move);
+        }
         var remove = new MenuItem { Header = "Retirer du lanceur" };
         remove.Click += (_, _) => { _launcher.Apps.Remove(app); _c.Settings.Save(); Refresh(); };
         menu.Items.Add(remove);
@@ -118,6 +136,116 @@ public sealed class LauncherView : UserControl
     }
 
     private void Launch(LauncherApp app) => _c.LaunchFromLauncher(_launcher, app);
+
+    // ---------- Réorganiser les tuiles (appui long puis glisser) ----------
+
+    private static readonly Brush HoldBorder = Frozen(new SolidColorBrush(Color.FromRgb(0x9B, 0xDC, 0xFF)));
+    private Border? _held;
+    private bool _dragging, _holdCancelled;
+    private Point _holdStart, _grabOffset;
+    private System.Windows.Threading.DispatcherTimer? _holdTimer;
+
+    private void BeginHold(Border tile, MouseButtonEventArgs e)
+    {
+        _held = tile;
+        _dragging = false;
+        // Pendant une recherche, la grille est filtrée : on ne réordonne pas.
+        _holdCancelled = _search.Text.Length > 0;
+        _holdStart = e.GetPosition(_tiles);
+        tile.CaptureMouse();
+        e.Handled = true;
+        if (_holdCancelled) return;
+
+        // Le contour se charge en bleu clair pendant l'appui.
+        tile.BorderBrush = HoldBorder;
+        tile.BorderThickness = new Thickness(2);
+        tile.BeginAnimation(OpacityProperty, new System.Windows.Media.Animation.DoubleAnimation(1, 0.75, TimeSpan.FromMilliseconds(500)) { AutoReverse = true });
+        _holdTimer?.Stop();
+        _holdTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+        _holdTimer.Tick += (_, _) =>
+        {
+            _holdTimer!.Stop();
+            if (_held != tile || _holdCancelled) return;
+            // Tuile décrochée : elle suit la souris.
+            _dragging = true;
+            tile.BeginAnimation(OpacityProperty, null);
+            tile.Opacity = 0.9;
+            Panel.SetZIndex(tile, 10);
+            var origin = tile.TranslatePoint(new Point(0, 0), _tiles);
+            _grabOffset = new Point(_holdStart.X - origin.X, _holdStart.Y - origin.Y);
+            tile.RenderTransform = new TranslateTransform();
+        };
+        _holdTimer.Start();
+    }
+
+    private void OnHoldMove(Border tile, MouseEventArgs e)
+    {
+        if (_held != tile) return;
+        var p = e.GetPosition(_tiles);
+        if (!_dragging)
+        {
+            if (!_holdCancelled && (p - _holdStart).Length > 10) CancelHoldLook(tile);
+            return;
+        }
+
+        // La tuile la plus proche de la souris donne la nouvelle place.
+        int target = -1;
+        double best = double.MaxValue;
+        for (int i = 0; i < _launcher.Apps.Count && i < _tiles.Children.Count; i++)
+        {
+            if (_tiles.Children[i] is not Border other) continue;
+            var c = other.TranslatePoint(new Point(other.ActualWidth / 2, other.ActualHeight / 2), _tiles);
+            if (other == tile && other.RenderTransform is TranslateTransform tt) c = new Point(c.X - tt.X, c.Y - tt.Y);
+            double d = (c - p).LengthSquared;
+            if (d < best) { best = d; target = i; }
+        }
+        int current = _tiles.Children.IndexOf(tile);
+        if (target >= 0 && target != current)
+        {
+            var app = (LauncherApp)tile.Tag;
+            _launcher.Apps.Remove(app);
+            _launcher.Apps.Insert(target, app);
+            _tiles.Children.Remove(tile);
+            _tiles.Children.Insert(target, tile);
+            _tiles.UpdateLayout();
+        }
+
+        // Suit la souris depuis sa nouvelle place dans la grille.
+        tile.RenderTransform = new TranslateTransform();
+        var slot = tile.TranslatePoint(new Point(0, 0), _tiles);
+        tile.RenderTransform = new TranslateTransform(p.X - _grabOffset.X - slot.X, p.Y - _grabOffset.Y - slot.Y);
+    }
+
+    private void EndHold(Border tile, LauncherApp app)
+    {
+        if (_held != tile) return;
+        _holdTimer?.Stop();
+        tile.ReleaseMouseCapture();
+        _held = null;
+        if (_dragging)
+        {
+            _dragging = false;
+            tile.RenderTransform = null;
+            Panel.SetZIndex(tile, 0);
+            tile.Opacity = 1;
+            CancelHoldLook(tile);
+            _c.Settings.Save();
+            return;
+        }
+        bool cancelled = _holdCancelled && _search.Text.Length == 0;
+        CancelHoldLook(tile);
+        if (!cancelled) Launch(app);
+    }
+
+    private void CancelHoldLook(Border tile)
+    {
+        _holdCancelled = true;
+        _holdTimer?.Stop();
+        tile.BeginAnimation(OpacityProperty, null);
+        tile.Opacity = 1;
+        tile.BorderBrush = TileBorder;
+        tile.BorderThickness = new Thickness(1);
+    }
 
     private static Border MakeTile(FrameworkElement visual, string name, Brush foreground)
     {

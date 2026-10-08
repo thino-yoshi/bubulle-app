@@ -26,6 +26,7 @@ SolidCompression=yes
 WizardStyle=modern
 UninstallDisplayName=Bubulle
 UninstallDisplayIcon={app}\Bubulle.exe
+SetupIconFile=..\src\Assets\bubulle.ico
 CloseApplications=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible

@@ -454,6 +454,20 @@ public sealed class AppController : IDisposable
         _search.Show();
     }
 
+    /// <summary>Range une app d'un lanceur dans un autre (clic droit → Déplacer vers).</summary>
+    public void MoveLauncherApp(LauncherApp app, BubbleConfig from, BubbleConfig to)
+    {
+        if (!from.Apps.Remove(app)) return;
+        bool already = to.Apps.Any(x => app.Kind == "Web"
+            ? x.Url.Equals(app.Url, StringComparison.OrdinalIgnoreCase)
+            : x.LaunchPath.Equals(app.LaunchPath, StringComparison.OrdinalIgnoreCase));
+        if (!already) to.Apps.Add(app);
+        Settings.Save();
+        foreach (var b in new[] { from, to })
+            if (_frames.TryGetValue(b, out var f)) f.RefreshLauncher();
+        Notify(already ? $"{app.Name} était déjà dans {to.Name}." : $"{app.Name} est maintenant dans {to.Name}.");
+    }
+
     /// <summary>« Personnaliser… » : nom et logo de n'importe quelle bulle.</summary>
     public void CustomizeBubble(BubbleConfig bubble)
     {
@@ -1074,6 +1088,15 @@ public sealed class AppController : IDisposable
 
     private static System.Drawing.Icon MakeTrayIcon()
     {
+        // L'icône de Bubulle, à la taille de la zone de notification.
+        var file = Path.Combine(AppContext.BaseDirectory, "bubulle.ico");
+        if (File.Exists(file))
+        {
+            try { return new System.Drawing.Icon(file, Forms.SystemInformation.SmallIconSize); }
+            catch (Exception ex) { App.Log(ex); }
+        }
+
+        // Secours : une bulle dessinée.
         using var bmp = new System.Drawing.Bitmap(32, 32);
         using (var g = System.Drawing.Graphics.FromImage(bmp))
         {

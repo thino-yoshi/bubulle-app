@@ -8,9 +8,10 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\bubulle.ico</ApplicationIcon>
     <AssemblyName>Bubulle</AssemblyName>
     <RootNamespace>Bulles</RootNamespace>
-    <Version>0.0.4</Version>
+    <Version>0.0.5</Version>
     <SatelliteResourceLanguages>fr;en</SatelliteResourceLanguages>
     <NoWarn>$(NoWarn);WFAC010</NoWarn>
   </PropertyGroup>
@@ -23,6 +24,7 @@
 
   <ItemGroup>
     <!-- Son de déploiement par défaut, copié à côté de l'app (dossier sounds). -->
+    <None Include="Assets\bubulle.ico" Link="bubulle.ico" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Assets\sounds\open.m4a" Link="sounds\open.m4a" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
