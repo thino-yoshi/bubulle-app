@@ -35,7 +35,7 @@ public sealed class SearchWindow : Window
         _anchorY = anchorY;
         _growsUp = growsUp;
 
-        Title = "Bulles — recherche";
+        Title = "Bubulle — recherche";
         WindowStyle = WindowStyle.None;
         AllowsTransparency = true;
         Background = Brushes.Transparent;
@@ -143,7 +143,7 @@ public sealed class SearchWindow : Window
         AddSection("Fenêtres ouvertes", open);
         AddSection("Applications du PC", apps);
         // Toujours proposés : n'importe quel programme du PC, ou n'importe quel site web.
-        if (ShowTools) AddSection("Outils Bulles", Filter(new[] { LauncherEntry, MixerEntry }, q).ToList());
+        if (ShowTools) AddSection("Outils Bubulle", Filter(new[] { LauncherEntry, MixerEntry }, q).ToList());
         _list.Items.Add(SectionHeader("Ajouter le tien"));
         _list.Items.Add(MakeItem(BrowseEntry));
         _list.Items.Add(MakeItem(AddSiteEntry));

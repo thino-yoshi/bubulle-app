@@ -16,12 +16,12 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
-        _mutex = new Mutex(true, "Bulles.SingleInstance", out bool first);
+        _mutex = new Mutex(true, "Bubulle.SingleInstance", out bool first);
         if (!first)
         {
             // Lancé automatiquement alors que Bulles tourne déjà : on s'arrête sans message.
             if (Array.IndexOf(e.Args, StartupArgument) < 0)
-                MessageBox.Show("Bulles est déjà lancé (icône près de l'horloge).", "Bulles");
+                MessageBox.Show("Bubulle est déjà lancé (icône près de l'horloge).", "Bubulle");
             Shutdown();
             return;
         }

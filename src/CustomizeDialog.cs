@@ -40,7 +40,7 @@ public sealed class CustomizeDialog : Window
 
     public CustomizeDialog(BubbleConfig bubble)
     {
-        Title = "Bulles — personnaliser";
+        Title = "Bubulle — personnaliser";
         WindowStyle = WindowStyle.None;
         AllowsTransparency = true;
         Background = Brushes.Transparent;

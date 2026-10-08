@@ -91,7 +91,7 @@ public sealed class SettingsView : UserControl
         }
         Add(card, Row("Écran des bulles", "Tu peux aussi glisser la bulle principale vers un autre écran.", screens));
 
-        Add(card, Toggle("Lancer Bulles au démarrage de Windows", null, _s.StartWithWindows, v => { _s.StartWithWindows = v; _s.Save(); _c.ApplyStartupSetting(); }));
+        Add(card, Toggle("Lancer Bubulle au démarrage de Windows", null, _s.StartWithWindows, v => { _s.StartWithWindows = v; _s.Save(); _c.ApplyStartupSetting(); }));
         Add(card, Toggle("Cacher la fenêtre quand je clique ailleurs", "Par exemple en revenant au jeu (sauf si elle est épinglée).", _s.AutoHide, v => { _s.AutoHide = v; _s.Save(); }));
         Add(card, Toggle("Garder les sites web connectés en arrière-plan", "Pastilles de messages dès le démarrage. Prend effet au prochain lancement.", _s.PreloadWeb, v => { _s.PreloadWeb = v; _s.Save(); }));
         _root.Children.Add(card.Border);
@@ -120,7 +120,7 @@ public sealed class SettingsView : UserControl
     private void BuildCursor()
     {
         var card = Card("Curseur", "");
-        Add(card, Toggle("Utiliser mon curseur au-dessus de Bulles", "Ailleurs, Windows garde son curseur habituel.", _s.UseCustomCursor,
+        Add(card, Toggle("Utiliser mon curseur au-dessus de Bubulle", "Ailleurs, Windows garde son curseur habituel.", _s.UseCustomCursor,
             v => { _s.UseCustomCursor = v; _s.Save(); AppCursor.Apply(_s); }));
 
         var preview = new Image { Width = 36, Height = 36, Margin = new Thickness(0, 0, 12, 0), VerticalAlignment = VerticalAlignment.Center };
@@ -229,10 +229,10 @@ public sealed class SettingsView : UserControl
 
     private void BuildAbout()
     {
-        var card = Card("Bulles", "");
+        var card = Card("Bubulle", "");
         var folder = new Button { Content = "Ouvrir le dossier des données", Style = Theme.Button };
         folder.Click += (_, _) => { try { Process.Start("explorer.exe", $"\"{AppSettings.Dir}\""); } catch (Exception ex) { App.Log(ex); } };
-        var quit = new Button { Content = "Quitter Bulles", Style = Theme.Button, Margin = new Thickness(8, 0, 0, 0), Foreground = new SolidColorBrush(Color.FromRgb(0xFF, 0x8A, 0x80)) };
+        var quit = new Button { Content = "Quitter Bubulle", Style = Theme.Button, Margin = new Thickness(8, 0, 0, 0), Foreground = new SolidColorBrush(Color.FromRgb(0xFF, 0x8A, 0x80)) };
         quit.Click += (_, _) => _c.Quit();
         var buttons = new StackPanel { Orientation = Orientation.Horizontal };
         buttons.Children.Add(folder);

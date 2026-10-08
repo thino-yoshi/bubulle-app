@@ -238,7 +238,7 @@ public sealed class MixerView : UserControl
 
     /// <summary>Le moteur web des bulles s'appelle « msedgewebview2 » : on l'affiche comme « Bulles (pages web) ».</summary>
     private static string FriendlyName(string exe, string path) =>
-        exe.Equals("msedgewebview2", StringComparison.OrdinalIgnoreCase) ? "Bulles · pages web" : AppCatalog.FriendlyName(path);
+        exe.Equals("msedgewebview2", StringComparison.OrdinalIgnoreCase) ? "Bubulle · pages web" : AppCatalog.FriendlyName(path);
 
     private void UpdateMeters()
     {

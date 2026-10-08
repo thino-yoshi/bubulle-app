@@ -21,7 +21,7 @@ public sealed class WebSiteDialog : Window
 
     public WebSiteDialog()
     {
-        Title = "Bulles — ajouter un site web";
+        Title = "Bubulle — ajouter un site web";
         WindowStyle = WindowStyle.None;
         AllowsTransparency = true;
         Background = Brushes.Transparent;

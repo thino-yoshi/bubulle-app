@@ -98,7 +98,33 @@ public class AppSettings
 
     public bool IsLeft => Side == "Left";
 
-    public static string Dir => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Bulles");
+    private static string? _dir;
+
+    /// <summary>Dossier des données (%APPDATA%\Bubulle). L'ancien dossier « Bulles » est repris une fois.</summary>
+    public static string Dir => _dir ??= ResolveDir();
+
+    private static string ResolveDir()
+    {
+        var roaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        var dir = Path.Combine(roaming, "Bubulle");
+        var old = Path.Combine(roaming, "Bulles");
+        if (Directory.Exists(dir) || !Directory.Exists(old)) return dir;
+        try
+        {
+            // L'app s'appelait « Bulles » : on déplace tout (bulles, sons, curseur, connexions web)…
+            Directory.Move(old, dir);
+            // …et on corrige les chemins enregistrés dans les réglages.
+            var file = Path.Combine(dir, "settings.json");
+            if (File.Exists(file))
+                File.WriteAllText(file, File.ReadAllText(file).Replace(@"\\Roaming\\Bulles\\", @"\\Roaming\\Bubulle\\"));
+            return dir;
+        }
+        catch
+        {
+            // Dossier encore utilisé (ancienne version ouverte) : on continue avec l'ancien.
+            return old;
+        }
+    }
     private static string FilePath => Path.Combine(Dir, "settings.json");
 
     public static AppSettings Load()

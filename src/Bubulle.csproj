@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -8,9 +8,9 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <AssemblyName>Bulles</AssemblyName>
+    <AssemblyName>Bubulle</AssemblyName>
     <RootNamespace>Bulles</RootNamespace>
-    <Version>0.0.2</Version>
+    <Version>0.0.3</Version>
     <NoWarn>$(NoWarn);WFAC010</NoWarn>
   </PropertyGroup>
 

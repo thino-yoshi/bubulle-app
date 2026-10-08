@@ -45,7 +45,7 @@ public sealed class LauncherWindow : Window
     public LauncherWindow(AppController controller)
     {
         _c = controller;
-        Title = "Bulles";
+        Title = "Bubulle";
         WindowStyle = WindowStyle.None;
         AllowsTransparency = true;
         Background = Brushes.Transparent;
@@ -487,7 +487,7 @@ public sealed class LauncherWindow : Window
 
     private Grid CreateMainBubble()
     {
-        var g = new Grid { Width = MainSize, Height = MainSize, Cursor = Cursors.Hand, ToolTip = "Bulles" };
+        var g = new Grid { Width = MainSize, Height = MainSize, Cursor = Cursors.Hand, ToolTip = "Bubulle" };
         g.Children.Add(new Ellipse { Fill = AccentBrush });
         g.Children.Add(new Ellipse { Stroke = Brushes.White, StrokeThickness = 2.5, Margin = new Thickness(3) });
         g.Children.Add(new Ellipse { Fill = Brushes.White, Width = 16, Height = 16 });
@@ -526,7 +526,7 @@ public sealed class LauncherWindow : Window
         var menu = new ContextMenu();
         var settings = new MenuItem { Header = "Paramètres" };
         settings.Click += (_, _) => _c.OpenSettings();
-        var quit = new MenuItem { Header = "Quitter Bulles" };
+        var quit = new MenuItem { Header = "Quitter Bubulle" };
         quit.Click += (_, _) => _c.Quit();
         menu.Items.Add(settings);
         menu.Items.Add(quit);

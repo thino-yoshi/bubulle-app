@@ -882,6 +882,8 @@ public sealed class AppController : IDisposable
     /// Lancement au démarrage via une tâche planifiée « à l'ouverture de session » : plus fiable que la clé
     /// Run du registre, que Windows n'a pas exécutée chez toi. L'ancienne entrée Run est supprimée.
     /// </summary>
+    private const string StartupTaskName = "Bubulle";
+
     private void ApplyStartup()
     {
         try
@@ -899,16 +901,19 @@ public sealed class AppController : IDisposable
             dynamic service = Activator.CreateInstance(Type.GetTypeFromProgID("Schedule.Service")!)!;
             service.Connect();
             dynamic folder = service.GetFolder("\\");
+            // Ancienne tâche, du temps où l'app s'appelait « Bulles ».
+            try { folder.DeleteTask("Bulles", 0); }
+            catch { /* Elle n'existait pas. */ }
             if (!Settings.StartWithWindows)
             {
-                try { folder.DeleteTask("Bulles", 0); }
+                try { folder.DeleteTask(StartupTaskName, 0); }
                 catch { /* La tâche n'existait pas. */ }
                 return;
             }
 
             string user = $"{Environment.UserDomainName}\\{Environment.UserName}";
             dynamic task = service.NewTask(0);
-            task.RegistrationInfo.Description = "Lance Bulles à l'ouverture de session";
+            task.RegistrationInfo.Description = "Lance Bubulle à l'ouverture de session";
             task.Settings.DisallowStartIfOnBatteries = false;
             task.Settings.StopIfGoingOnBatteries = false;
             task.Settings.ExecutionTimeLimit = "PT0S";
@@ -923,7 +928,7 @@ public sealed class AppController : IDisposable
             task.Principal.UserId = user;
             task.Principal.LogonType = 3; // Session interactive, sans mot de passe.
             task.Principal.RunLevel = 0; // Droits normaux.
-            folder.RegisterTaskDefinition("Bulles", task, 6, null, null, 3);
+            folder.RegisterTaskDefinition(StartupTaskName, task, 6, null, null, 3);
         }
         catch (Exception ex)
         {
@@ -1003,11 +1008,11 @@ public sealed class AppController : IDisposable
             }
         };
         menu.Items.Add("Paramètres", null, (_, _) => OpenSettings());
-        menu.Items.Add("Quitter Bulles", null, (_, _) => Quit());
+        menu.Items.Add("Quitter Bubulle", null, (_, _) => Quit());
         var tray = new Forms.NotifyIcon
         {
             Icon = MakeTrayIcon(),
-            Text = "Bulles v0.0.2",
+            Text = $"Bubulle v{typeof(App).Assembly.GetName().Version?.ToString(3)}",
             ContextMenuStrip = menu,
             Visible = true,
         };
@@ -1031,7 +1036,7 @@ public sealed class AppController : IDisposable
         return System.Drawing.Icon.FromHandle(bmp.GetHicon());
     }
 
-    private void Notify(string message) => _tray.ShowBalloonTip(4000, "Bulles", message, Forms.ToolTipIcon.Info);
+    private void Notify(string message) => _tray.ShowBalloonTip(4000, "Bubulle", message, Forms.ToolTipIcon.Info);
 
     private void OnDisplayChanged(object? sender, EventArgs e) =>
         _launcher.Dispatcher.BeginInvoke(() =>
