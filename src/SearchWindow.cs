@@ -143,7 +143,7 @@ public sealed class SearchWindow : Window
         AddSection("Fenêtres ouvertes", open);
         AddSection("Applications du PC", apps);
         // Toujours proposés : n'importe quel programme du PC, ou n'importe quel site web.
-        AddSection("Outils Bulles", Filter(new[] { MixerEntry }, q).ToList());
+        if (ShowTools) AddSection("Outils Bulles", Filter(new[] { LauncherEntry, MixerEntry }, q).ToList());
         _list.Items.Add(SectionHeader("Ajouter le tien"));
         _list.Items.Add(MakeItem(BrowseEntry));
         _list.Items.Add(MakeItem(AddSiteEntry));
@@ -168,6 +168,12 @@ public sealed class SearchWindow : Window
 
     /// <summary>Le mélangeur audio de Bulles, à ajouter comme une bulle.</summary>
     public static readonly AppEntry MixerEntry = new() { Kind = "Mixer", Name = "Mélangeur audio" };
+
+    /// <summary>Un répertoire d'apps lancées normalement (on peut en avoir plusieurs).</summary>
+    public static readonly AppEntry LauncherEntry = new() { Kind = "Launcher", Name = "Lanceur (répertoire d'apps)" };
+
+    /// <summary>false quand on ajoute une app dans un lanceur : pas d'outils Bulles dans la liste.</summary>
+    public bool ShowTools { get; init; } = true;
 
     /// <summary>Entrée spéciale « Ajouter un site web… » : ouvre la fenêtre nom + adresse.</summary>
     public static readonly AppEntry AddSiteEntry = new() { Kind = "AddSite", Name = "Ajouter un site web… (ta propre page)" };
@@ -201,7 +207,7 @@ public sealed class SearchWindow : Window
         else
             row.Children.Add(new TextBlock
             {
-                Text = app.Kind == "Mixer" ? LauncherWindow.MixerGlyph : app.Kind == "AddSite" ? "" : app.Kind == "Browse" ? "" : app.IsWeb ? "" : "",
+                Text = app.Kind == "Launcher" ? BubbleGlyphs.Grid : app.Kind == "Mixer" ? LauncherWindow.MixerGlyph : app.Kind == "AddSite" ? "" : app.Kind == "Browse" ? "" : app.IsWeb ? "" : "",
                 FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),
                 FontSize = 16, Width = 20, Margin = new Thickness(0, 0, 10, 0), VerticalAlignment = VerticalAlignment.Center,
             });

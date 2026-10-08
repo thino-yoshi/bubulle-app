@@ -258,10 +258,10 @@ public sealed class BubbleFrame : Window
     {
         var bar = new DockPanel { LastChildFill = true, Margin = new Thickness(10, 0, 6, 0) };
 
-        var icon = IconFor(Bubble);
-        if (icon != null)
+        if (HeaderIcon(Bubble, 18) is { } img)
         {
-            var img = new Image { Source = icon, Width = 18, Height = 18, Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
+            img.Margin = new Thickness(0, 0, 8, 0);
+            img.VerticalAlignment = VerticalAlignment.Center;
             DockPanel.SetDock(img, Dock.Left);
             bar.Children.Add(img);
         }
@@ -285,7 +285,7 @@ public sealed class BubbleFrame : Window
         bar.Children.Add(through);
         DockPanel.SetDock(_opacity, Dock.Right);
         bar.Children.Add(_opacity);
-        if (!Bubble.IsMixer)
+        if (Bubble.IsWeb || Bubble.IsWindowApp)
         {
             var volume = BuildVolumeButton();
             DockPanel.SetDock(volume, Dock.Right);
@@ -327,11 +327,13 @@ public sealed class BubbleFrame : Window
             }
         }
 
-        bar.Children.Add(new TextBlock
+        var name = new TextBlock
         {
             Text = Bubble.Name, Foreground = HeaderFg, FontSize = 13, VerticalAlignment = VerticalAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(4, 0, 0, 0),
-        });
+        };
+        _nameTexts.Add(name);
+        bar.Children.Add(name);
         return Wrap(bar);
     }
 
@@ -369,18 +371,20 @@ public sealed class BubbleFrame : Window
         restore.Click += (_, _) => _c.ToggleMini(this);
         through.Click += (_, _) => _c.ToggleClickThrough(this);
 
-        var icon = IconFor(Bubble);
-        if (icon != null)
+        if (HeaderIcon(Bubble, 14) is { } img)
         {
-            var img = new Image { Source = icon, Width = 14, Height = 14, Margin = new Thickness(0, 0, 6, 0), VerticalAlignment = VerticalAlignment.Center };
+            img.Margin = new Thickness(0, 0, 6, 0);
+            img.VerticalAlignment = VerticalAlignment.Center;
             DockPanel.SetDock(img, Dock.Left);
             bar.Children.Add(img);
         }
-        bar.Children.Add(new TextBlock
+        var name = new TextBlock
         {
             Text = Bubble.Name, Foreground = HeaderFg, FontSize = 11.5, VerticalAlignment = VerticalAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis,
-        });
+        };
+        _nameTexts.Add(name);
+        bar.Children.Add(name);
         var grip = new Border { Child = bar, Background = Brushes.Transparent, Cursor = Cursors.SizeAll, ToolTip = "Tiens pour déplacer" };
         grip.MouseLeftButtonDown += (_, e) => { if (e.OriginalSource is not TextBlock { Parent: ButtonBase }) DragMove(); };
         return grip;
@@ -470,8 +474,50 @@ public sealed class BubbleFrame : Window
         }
     }
 
-    public static ImageSource? IconFor(BubbleConfig b) =>
-        b.IsWeb && string.IsNullOrEmpty(b.IconPath) ? IconLoader.CachedFavicon(b.Url) : IconLoader.Load(b.IconPath, b.IconIndex, b.LaunchPath);
+    /// <summary>Icône image de la bulle, ou null si elle a un logo choisi (ou pas d'icône : lanceur, mélangeur).</summary>
+    public static ImageSource? IconFor(BubbleConfig b)
+    {
+        if (b.Glyph.Length > 0 || b.IsLauncher || b.IsMixer) return null;
+        return b.IsWeb && string.IsNullOrEmpty(b.IconPath) ? IconLoader.CachedFavicon(b.Url) : IconLoader.Load(b.IconPath, b.IconIndex, b.LaunchPath);
+    }
+
+    /// <summary>Logo (caractère d'icône) affiché à la place d'une image.</summary>
+    public static string GlyphFor(BubbleConfig b) =>
+        b.Glyph.Length > 0 ? b.Glyph : b.IsMixer ? LauncherWindow.MixerGlyph : b.IsLauncher ? BubbleGlyphs.Grid : "";
+
+    /// <summary>Petite icône de la barre du haut : l'image de l'app, ou son logo choisi.</summary>
+    private static FrameworkElement? HeaderIcon(BubbleConfig b, double size)
+    {
+        var image = IconFor(b);
+        if (image != null) return new Image { Source = image, Width = size, Height = size };
+        var glyph = GlyphFor(b);
+        if (glyph.Length == 0) return null;
+        return new TextBlock { Text = glyph, FontFamily = BubbleGlyphs.Font, FontSize = size * 0.9, Foreground = new SolidColorBrush(LauncherWindow.Accent) };
+    }
+
+    // ---------- Lanceur ----------
+
+    private LauncherView? _launcherView;
+
+    public void InitLauncher()
+    {
+        if (_launcherView != null) { _launcherView.Refresh(); return; }
+        _launcherView = new LauncherView(_c, Bubble);
+        _host.Child = _launcherView;
+    }
+
+    public void RefreshLauncher() => _launcherView?.Refresh();
+
+    public void FocusLauncherSearch() => _launcherView?.FocusSearch();
+
+    /// <summary>Met à jour le nom affiché après « Personnaliser… ».</summary>
+    public void UpdateLook()
+    {
+        Title = Bubble.Name;
+        foreach (var t in _nameTexts) t.Text = Bubble.Name;
+    }
+
+    private readonly System.Collections.Generic.List<TextBlock> _nameTexts = new();
 
     // ---------- Mélangeur audio ----------
 
@@ -490,6 +536,7 @@ public sealed class BubbleFrame : Window
         _web = new WebView2CompositionControl { DefaultBackgroundColor = System.Drawing.Color.FromArgb(0x12, 0x15, 0x1C), UseLayoutRounding = true };
         RenderOptions.SetBitmapScalingMode(_web, BitmapScalingMode.NearestNeighbor);
         _host.Child = _web;
+        AppCursor.SuspendOver(_web);
         await _web.EnsureCoreWebView2Async(env);
         var core = _web.CoreWebView2;
         core.NewWindowRequested += (_, e) =>

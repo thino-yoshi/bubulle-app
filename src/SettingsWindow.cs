@@ -125,6 +125,9 @@ public sealed class SettingsWindow : Window
         root.Children.Add(SoundRow("Son de déploiement", () => _openSound, p => _openSound = p, "open"));
         root.Children.Add(SoundRow("Son de repli", () => _closeSound, p => _closeSound = p, "close"));
 
+        root.Children.Add(Section("Curseur"));
+        root.Children.Add(BuildCursorSection());
+
         root.Children.Add(Section("Bulles"));
         _perBubble = new CheckBox { Content = "Raccourci clavier par bulle", IsChecked = _s.PerBubbleHotkeys, Margin = new Thickness(0, 0, 0, 8) };
         root.Children.Add(_perBubble);
@@ -198,6 +201,8 @@ public sealed class SettingsWindow : Window
         _s.DefaultHeightPct = (int)_height.Value;
         _s.AutoHide = _autoHide.IsChecked == true;
         _s.PreloadWeb = _preload.IsChecked == true;
+        _s.UseCustomCursor = _cursorOn?.IsChecked == true;
+        _s.CursorPath = _cursorPath;
         _s.SoundEnabled = _soundOn.IsChecked == true;
         _s.SoundVolume = (int)_soundVolume.Value;
         _s.OpenSoundPath = _openSound;
@@ -214,6 +219,82 @@ public sealed class SettingsWindow : Window
         _s.Save();
         Saved?.Invoke();
         Close();
+    }
+
+    private CheckBox? _cursorOn;
+    private string _cursorPath = "";
+
+    /// <summary>Curseur perso : capturé depuis un jeu (5 s pour passer dessus) ou choisi dans un fichier.</summary>
+    private StackPanel BuildCursorSection()
+    {
+        _cursorPath = _s.CursorPath;
+        _cursorOn = new CheckBox { Content = "Utiliser mon curseur au-dessus de Bulles (ailleurs, Windows garde le sien)", IsChecked = _s.UseCustomCursor };
+        var preview = new Image { Width = 32, Height = 32, Margin = new Thickness(0, 0, 10, 0), VerticalAlignment = VerticalAlignment.Center };
+        var status = new TextBlock { Foreground = Brushes.Gray, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap, MaxWidth = 300 };
+        void Refresh()
+        {
+            preview.Source = null;
+            status.Text = "Aucun curseur";
+            if (_cursorPath.Length == 0 || !System.IO.File.Exists(_cursorPath)) return;
+            status.Text = System.IO.Path.GetFileName(_cursorPath);
+            try
+            {
+                using var icon = new System.Drawing.Icon(_cursorPath);
+                using var bmp = icon.ToBitmap();
+                using var png = new System.IO.MemoryStream();
+                bmp.Save(png, System.Drawing.Imaging.ImageFormat.Png);
+                png.Position = 0;
+                var image = new System.Windows.Media.Imaging.BitmapImage();
+                image.BeginInit();
+                image.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+                image.StreamSource = png;
+                image.EndInit();
+                preview.Source = image;
+            }
+            catch { /* Aperçu impossible (curseur animé) : le nom du fichier suffit. */ }
+        }
+        Refresh();
+
+        var capture = new Button { Content = "Capturer depuis un jeu", Padding = new Thickness(10, 3, 10, 3) };
+        var choose = new Button { Content = "Choisir un fichier…", Padding = new Thickness(10, 3, 10, 3), Margin = new Thickness(6, 0, 0, 0) };
+        capture.Click += async (_, _) =>
+        {
+            capture.IsEnabled = false;
+            for (int s = 5; s > 0; s--)
+            {
+                status.Text = $"Passe sur ton jeu et laisse la souris dessus… {s}";
+                await System.Threading.Tasks.Task.Delay(1000);
+            }
+            var path = AppCursor.CaptureCurrent();
+            capture.IsEnabled = true;
+            if (path == null)
+            {
+                status.Text = "Aucun curseur visible à ce moment-là. Réessaie avec la souris immobile sur le jeu.";
+                return;
+            }
+            _cursorPath = path;
+            _cursorOn!.IsChecked = true;
+            Refresh();
+            Activate();
+        };
+        choose.Click += (_, _) =>
+        {
+            var dialog = new Microsoft.Win32.OpenFileDialog { Title = "Choisir un curseur", Filter = "Curseurs (*.cur, *.ani)|*.cur;*.ani" };
+            if (dialog.ShowDialog(this) != true) return;
+            _cursorPath = dialog.FileName;
+            _cursorOn!.IsChecked = true;
+            Refresh();
+        };
+
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
+        row.Children.Add(preview);
+        row.Children.Add(capture);
+        row.Children.Add(choose);
+        var panel = new StackPanel();
+        panel.Children.Add(_cursorOn);
+        panel.Children.Add(row);
+        panel.Children.Add(new StackPanel { Margin = new Thickness(0, 6, 0, 0), Children = { status } });
+        return panel;
     }
 
     /// <summary>Ligne « son » : nom du fichier, Choisir… (copié dans Bulles), Tester, Retirer.</summary>

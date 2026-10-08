@@ -13,6 +13,16 @@ public class BubbleConfig
     public bool IsWeb => Kind == "Web";
     /// <summary>"Mixer" = mélangeur audio intégré à Bulles.</summary>
     public bool IsMixer => Kind == "Mixer";
+    /// <summary>"Launcher" = répertoire d'apps lancées normalement (hors bulle).</summary>
+    public bool IsLauncher => Kind == "Launcher";
+    /// <summary>Apps lancées en vraie fenêtre ou dans une bulle-fenêtre ?</summary>
+    public bool IsWindowApp => Kind == "App";
+
+    /// <summary>Logo choisi (caractère de la police d'icônes Windows), vide = icône d'origine.</summary>
+    public string Glyph { get; set; } = "";
+
+    /// <summary>Contenu d'une bulle Lanceur.</summary>
+    public List<LauncherApp> Apps { get; set; } = new();
     public string Name { get; set; } = "";
     public string LaunchPath { get; set; } = "";
     public string ProcessName { get; set; } = "";
@@ -32,8 +42,22 @@ public class BubbleConfig
     public int Volume { get; set; } = 100;
 }
 
+/// <summary>Une app dans un lanceur : programme du PC ou site web (ouvert dans ton navigateur).</summary>
+public class LauncherApp
+{
+    public string Kind { get; set; } = "App";
+    public string Name { get; set; } = "";
+    public string LaunchPath { get; set; } = "";
+    public string Url { get; set; } = "";
+    public string IconPath { get; set; } = "";
+    public int IconIndex { get; set; }
+}
+
 public class AppSettings
 {
+    /// <summary>Le premier lanceur a été ajouté (une seule fois, tu peux le retirer ensuite).</summary>
+    public bool DefaultLauncherAdded { get; set; }
+
     public string MainHotkey { get; set; } = "Alt+Space";
     public bool PerBubbleHotkeys { get; set; }
     public string Side { get; set; } = "Right";
@@ -54,6 +78,10 @@ public class AppSettings
     public double MiniTop { get; set; }
     public double MiniWidth { get; set; }
     public double MiniHeight { get; set; }
+
+    /// <summary>Curseur perso affiché au-dessus de Bulles (ex. celui d'AION2).</summary>
+    public bool UseCustomCursor { get; set; }
+    public string CursorPath { get; set; } = "";
 
     /// <summary>Sons d'interface : déploiement / repli des bulles.</summary>
     public bool SoundEnabled { get; set; } = true;

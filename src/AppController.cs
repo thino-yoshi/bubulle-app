@@ -48,6 +48,15 @@ public sealed class AppController : IDisposable
     {
         Settings = settings;
         Sounds = new Sounds(settings);
+        AppCursor.Apply(settings);
+
+        // Un lanceur est proposé de base (une seule fois : tu peux le retirer ensuite).
+        if (!Settings.DefaultLauncherAdded)
+        {
+            Settings.Bubbles.Add(NewLauncher("Lanceur"));
+            Settings.DefaultLauncherAdded = true;
+            Settings.Save();
+        }
 
         _launcher = new LauncherWindow(this);
         _launcher.Show();
@@ -300,6 +309,7 @@ public sealed class AppController : IDisposable
             ClearActivity(bubble);
             if (bubble.IsWeb) await ShowWeb(bubble);
             else if (bubble.IsMixer) await ShowMixer(bubble);
+            else if (bubble.IsLauncher) await ShowLauncherBubble(bubble);
             else await ShowApp(bubble);
             if (_current != null) _returnFocus = returnFocus;
         }
@@ -336,6 +346,130 @@ public sealed class AppController : IDisposable
         await frame.InitWebAsync(await WebEnvironment());
         await fade;
         frame.FocusContent();
+    }
+
+    // ---------- Lanceurs (répertoires d'apps) ----------
+
+    private static BubbleConfig NewLauncher(string name) => new() { Kind = "Launcher", Name = name, Glyph = BubbleGlyphs.Grid };
+
+    private async Task ShowLauncherBubble(BubbleConfig bubble)
+    {
+        var frame = await GetReadyFrame(bubble);
+        frame.InitLauncher();
+        frame.Show();
+        Activate(frame);
+        frame.FocusLauncherSearch();
+        await frame.FadeInAsync();
+    }
+
+    /// <summary>Lance l'app normalement (sa propre fenêtre, hors bulle), puis referme le lanceur.</summary>
+    public void LaunchFromLauncher(BubbleConfig launcher, LauncherApp app)
+    {
+        try
+        {
+            var target = app.Kind == "Web" ? app.Url : app.LaunchPath;
+            Process.Start(new ProcessStartInfo(target) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            App.Log(ex);
+            Notify($"Impossible de lancer {app.Name}.");
+            return;
+        }
+        if (_frames.TryGetValue(launcher, out var frame))
+        {
+            // L'app qui démarre doit prendre le premier plan, pas le jeu d'avant.
+            if (_current == frame) _returnFocus = IntPtr.Zero;
+            HideFrame(frame);
+        }
+        CloseLauncher();
+    }
+
+    public void AddLauncher()
+    {
+        int count = Settings.Bubbles.Count(b => b.IsLauncher);
+        var launcher = NewLauncher(count == 0 ? "Lanceur" : $"Lanceur {count + 1}");
+        Settings.Bubbles.Add(launcher);
+        Settings.Save();
+        _launcher.Rebuild(replayOpen: false);
+        CustomizeBubble(launcher);
+    }
+
+    /// <summary>Ajoute une app (ou un site) dans un lanceur, avec la même recherche que la bulle « + ».</summary>
+    public void AddToLauncher(BubbleConfig launcher)
+    {
+        _search?.SafeClose();
+        const double width = 300;
+        double left, top;
+        if (_frames.TryGetValue(launcher, out var frame) && frame.IsVisible)
+        {
+            left = frame.Left + (frame.ActualWidth - width) / 2;
+            top = frame.Top + 50;
+        }
+        else
+        {
+            var (centerY, stripLeft, stripRight) = _launcher.AnchorDip(launcher);
+            left = Settings.IsLeft ? stripRight - 6 : stripLeft + 6 - width;
+            top = centerY - 20;
+        }
+
+        bool AlreadyIn(AppEntry a) => launcher.Apps.Any(x => a.IsWeb
+            ? x.Url.Equals(a.Url, StringComparison.OrdinalIgnoreCase)
+            : x.LaunchPath.Equals(a.LaunchPath, StringComparison.OrdinalIgnoreCase));
+
+        _search = new SearchWindow(AlreadyIn, left, top, growsUp: false) { ShowTools = false };
+        _search.Picked += app => _launcher.Dispatcher.BeginInvoke(async () =>
+        {
+            AppEntry? chosen = app;
+            if (app.Kind == "Browse") chosen = PickProgramFile();
+            else if (app.Kind == "AddSite")
+            {
+                var dialog = new WebSiteDialog();
+                dialog.ShowDialog();
+                chosen = dialog.Result;
+            }
+            if (chosen == null || AlreadyIn(chosen)) return;
+
+            var entry = new LauncherApp
+            {
+                Kind = chosen.IsWeb ? "Web" : "App",
+                Name = chosen.Name,
+                LaunchPath = chosen.LaunchPath,
+                Url = chosen.Url,
+                IconPath = chosen.IconPath,
+                IconIndex = chosen.IconIndex,
+            };
+            if (chosen.IsWeb) entry.IconPath = await IconLoader.FetchFaviconAsync(chosen.Url);
+            launcher.Apps.Add(entry);
+            Settings.Save();
+            if (_frames.TryGetValue(launcher, out var f)) f.RefreshLauncher();
+        });
+        _search.Closed += (_, _) =>
+        {
+            _search = null;
+            _searchClosedAt = DateTime.Now;
+        };
+        _search.Show();
+    }
+
+    /// <summary>« Personnaliser… » : nom et logo de n'importe quelle bulle.</summary>
+    public void CustomizeBubble(BubbleConfig bubble)
+    {
+        var dialog = new CustomizeDialog(bubble);
+        dialog.ShowDialog();
+        if (!dialog.Saved) return;
+        bubble.Name = dialog.ResultName;
+        bubble.Glyph = dialog.ResultGlyph;
+        Settings.Save();
+        _launcher.Rebuild(replayOpen: false);
+        if (_current != null) _launcher.SetActive(_current.Bubble);
+        if (_frames.TryGetValue(bubble, out var frame)) frame.UpdateLook();
+    }
+
+    public void RevealFile(string path)
+    {
+        try { Process.Start("explorer.exe", $"/select,\"{path}\""); }
+        catch (Exception ex) { App.Log(ex); }
     }
 
     private async Task ShowMixer(BubbleConfig bubble)
@@ -463,7 +597,7 @@ public sealed class AppController : IDisposable
             frame.SetClickThrough(false);
             frame.ExitMini();
             var b = frame.Bubble;
-            _ = b.IsWeb || b.IsMixer ? frame.HideAnimatedAsync() : frame.ParkAnimatedAsync();
+            _ = b.IsWindowApp ? frame.ParkAnimatedAsync() : frame.HideAnimatedAsync();
             return;
         }
         if (_current == frame) HideCurrent(restoreFocus: true);
@@ -490,7 +624,7 @@ public sealed class AppController : IDisposable
         if (animate)
         {
             // App Windows : garée dans sa bulle (réouverture instantanée). Page web : simplement cachée.
-            _ = b.IsWeb || b.IsMixer ? frame.HideAnimatedAsync() : frame.ParkAnimatedAsync();
+            _ = b.IsWindowApp ? frame.ParkAnimatedAsync() : frame.HideAnimatedAsync();
         }
         else
         {
@@ -552,23 +686,27 @@ public sealed class AppController : IDisposable
     }
 
     /// <summary>Ajoute n'importe quel programme (.exe) ou raccourci du PC, même absent du menu Démarrer.</summary>
-    private void BrowseForApp()
+    /// <summary>Sélecteur de fichiers « un programme ou un raccourci » ; null si annulé ou invalide.</summary>
+    private AppEntry? PickProgramFile()
     {
         var dialog = new Microsoft.Win32.OpenFileDialog
         {
-            Title = "Choisir une application pour une nouvelle bulle",
+            Title = "Choisir une application",
             Filter = "Programmes et raccourcis (*.exe, *.lnk)|*.exe;*.lnk",
             InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
             DereferenceLinks = false,
         };
-        if (dialog.ShowDialog() != true) return;
+        if (dialog.ShowDialog() != true) return null;
 
         var app = AppCatalog.FromFile(dialog.FileName);
-        if (app == null)
-        {
-            Notify("Ce raccourci ne mène pas à un programme.");
-            return;
-        }
+        if (app == null) Notify("Ce raccourci ne mène pas à un programme.");
+        return app;
+    }
+
+    private void BrowseForApp()
+    {
+        var app = PickProgramFile();
+        if (app == null) return;
         if (IsAlreadyBubble(app))
         {
             Notify($"{app.Name} a déjà sa bulle.");
@@ -593,7 +731,7 @@ public sealed class AppController : IDisposable
     }
 
     private bool IsAlreadyBubble(AppEntry app) =>
-        Settings.Bubbles.Any(b => app.Kind == "Mixer" ? b.IsMixer : app.IsWeb
+        app.Kind != "Launcher" && Settings.Bubbles.Any(b => app.Kind == "Mixer" ? b.IsMixer : app.IsWeb
             ? b.IsWeb && b.Url.Equals(app.Url, StringComparison.OrdinalIgnoreCase)
             : !b.IsWeb && (b.LaunchPath.Equals(app.LaunchPath, StringComparison.OrdinalIgnoreCase) ||
                            b.Name.Equals(app.Name, StringComparison.OrdinalIgnoreCase)));
@@ -612,6 +750,13 @@ public sealed class AppController : IDisposable
             IconIndex = app.IconIndex,
             Hotkey = n < 9 ? $"Alt+{n + 1}" : "",
         };
+        if (bubble.IsLauncher)
+        {
+            // Plusieurs lanceurs : « Lanceur », « Lanceur 2 »… (renommables avec « Personnaliser… »).
+            int count = Settings.Bubbles.Count(b => b.IsLauncher);
+            bubble.Name = count == 0 ? "Lanceur" : $"Lanceur {count + 1}";
+            bubble.Glyph = BubbleGlyphs.Grid;
+        }
         if (bubble.IsWeb) bubble.IconPath = await IconLoader.FetchFaviconAsync(bubble.Url);
 
         Settings.Bubbles.Add(bubble);
@@ -696,6 +841,7 @@ public sealed class AppController : IDisposable
         {
             if (Settings.StartWithWindows != startupBefore) ApplyStartup();
             Sounds.Reload();
+            AppCursor.Apply(Settings);
             CloseLauncher();
             _launcher.UpdatePlacement();
             _launcher.Rebuild();

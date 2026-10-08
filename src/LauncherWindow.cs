@@ -197,13 +197,27 @@ public sealed class LauncherWindow : Window
         {
             var b = bubbles[i];
             var icon = BubbleFrame.IconFor(b);
-            string? glyph = icon != null ? null : b.IsMixer ? MixerGlyph : b.Name[..1].ToUpperInvariant();
+            var logo = BubbleFrame.GlyphFor(b);
+            string? glyph = icon != null ? null : logo.Length > 0 ? logo : b.Name[..1].ToUpperInvariant();
             var v = new BubbleVisual(AppSize, icon, glyph) { ToolTip = b.Name };
             // Clic court : ouvrir l'app. Appui long : le contour se remplit, puis la bulle se déplace.
             v.MouseLeftButtonDown += (_, e) => BeginHold(v, b, e);
             v.MouseMove += (_, e) => OnHoldMove(v, e);
             v.MouseLeftButtonUp += (_, _) => EndHold(v, b);
             var menu = new ContextMenu();
+            var customize = new MenuItem { Header = "Personnaliser… (nom et logo)" };
+            customize.Click += (_, _) => _c.CustomizeBubble(b);
+            menu.Items.Add(customize);
+            if (b.IsLauncher)
+            {
+                var addApp = new MenuItem { Header = "Ajouter une app à ce lanceur" };
+                addApp.Click += (_, _) => _c.AddToLauncher(b);
+                var newLauncher = new MenuItem { Header = "Nouveau lanceur" };
+                newLauncher.Click += (_, _) => _c.AddLauncher();
+                menu.Items.Add(addApp);
+                menu.Items.Add(newLauncher);
+            }
+            menu.Items.Add(new Separator());
             var remove = new MenuItem { Header = "Retirer la bulle" };
             remove.Click += (_, _) => _c.RemoveBubble(b);
             menu.Items.Add(remove);
