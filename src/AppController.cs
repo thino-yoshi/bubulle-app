@@ -125,6 +125,9 @@ public sealed class AppController : IDisposable
         _launcher.SetBadge(bubble, shown, total);
     }
 
+    /// <summary>Le GIF de notification a changé dans les paramètres.</summary>
+    public void ReloadNotificationGif() => _launcher.ReloadNotificationGif();
+
     private readonly HashSet<BubbleConfig> _activity = new();
     private readonly uint _shellHookMessage;
 

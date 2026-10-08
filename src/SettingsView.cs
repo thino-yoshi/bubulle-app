@@ -62,6 +62,7 @@ public sealed class SettingsView : UserControl
         BuildGeneral();
         BuildWindows();
         BuildSounds();
+        BuildNotifications();
         BuildCursor();
         BuildHotkeys();
         BuildAbout();
@@ -114,6 +115,48 @@ public sealed class SettingsView : UserControl
         Add(card, SliderRow("Volume des sons", 0, 100, _s.SoundVolume, "%", v => { _s.SoundVolume = v; _s.Save(); }));
         Add(card, SoundRow("Son de déploiement", () => _s.OpenSoundPath, p => _s.OpenSoundPath = p, "open"));
         Add(card, SoundRow("Son de repli", () => _s.CloseSoundPath, p => _s.CloseSoundPath = p, "close"));
+        _root.Children.Add(card.Border);
+    }
+
+    private void BuildNotifications()
+    {
+        var card = Card("Notifications", "");
+        Add(card, Toggle("Animer la bulle principale quand un message arrive", "Le GIF tourne en boucle tant que la cascade n'a pas été déployée pour voir le message.", _s.NotifyAnimation,
+            v => { _s.NotifyAnimation = v; _s.Save(); _c.ReloadNotificationGif(); }));
+
+        var file = new TextBlock { Foreground = TextSoft, FontSize = 12, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 130, Margin = new Thickness(0, 0, 10, 0) };
+        void Refresh() => file.Text = string.IsNullOrEmpty(_s.NotificationGifPath) ? "GIF de base" : Path.GetFileName(_s.NotificationGifPath);
+        Refresh();
+        var choose = new Button { Content = "Choisir…", Style = Theme.Button };
+        var reset = new Button { Content = "Par défaut", Style = Theme.Button, Margin = new Thickness(6, 0, 0, 0) };
+        choose.Click += (_, _) =>
+        {
+            var dialog = new Microsoft.Win32.OpenFileDialog
+            {
+                Title = "Choisir un GIF",
+                Filter = "Images animées (*.gif)|*.gif",
+                InitialDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads"),
+            };
+            if (dialog.ShowDialog() != true) return;
+            try
+            {
+                // Copié dans les données de Bubulle : il reste même si l'original est déplacé.
+                Directory.CreateDirectory(AppSettings.Dir);
+                var target = Path.Combine(AppSettings.Dir, "notification.gif");
+                File.Copy(dialog.FileName, target, true);
+                _s.NotificationGifPath = target;
+            }
+            catch (Exception ex) { App.Log(ex); }
+            _s.Save();
+            _c.ReloadNotificationGif();
+            Refresh();
+        };
+        reset.Click += (_, _) => { _s.NotificationGifPath = ""; _s.Save(); _c.ReloadNotificationGif(); Refresh(); };
+        var controls = new StackPanel { Orientation = Orientation.Horizontal };
+        controls.Children.Add(file);
+        controls.Children.Add(choose);
+        controls.Children.Add(reset);
+        Add(card, Row("Animation", null, controls));
         _root.Children.Add(card.Border);
     }
 

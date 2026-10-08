@@ -58,6 +58,7 @@ public sealed class LauncherWindow : Window
         _main = CreateMainBubble();
         _canvas.Children.Add(_main);
         Panel.SetZIndex(_main, 10);
+        ReloadNotificationGif();
 
         SourceInitialized += (_, _) =>
         {
@@ -288,6 +289,9 @@ public sealed class LauncherWindow : Window
         if (!IsOpen) _c.Sounds.PlayOpen();
         IsOpen = true;
         UpdateMainProgress();
+        // Cascade déployée : les messages sont vus, l'animation s'arrête.
+        _notifyPending = false;
+        UpdateNotifyAnimation();
         Native.SetWindowPos(new WindowInteropHelper(this).Handle, Native.HWND_TOPMOST, 0, 0, 0, 0,
             Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
         int i = 0;
@@ -325,10 +329,48 @@ public sealed class LauncherWindow : Window
     /// <summary>Pastille de non-lus sur une bulle ; la bulle principale affiche le total de toutes les bulles.</summary>
     public void SetBadge(BubbleConfig bubble, int count, int total)
     {
+        int old = _badgeCounts.GetValueOrDefault(bubble);
         _badgeCounts[bubble] = count;
         int i = _c.Settings.Bubbles.IndexOf(bubble);
         if (i >= 0 && i < _apps.Count) _apps[i].SetBadge(count);
         UpdateBadge(_mainBadge, total);
+
+        // Nouveau message (plus de non-lus, ou un point qui apparaît) pendant que la cascade est repliée.
+        static int Weight(int c) => c == DotBadge ? 1 : Math.Max(0, c);
+        if (!IsOpen && Weight(count) > Weight(old)) _notifyPending = true;
+        if (total == 0) _notifyPending = false;
+        UpdateNotifyAnimation();
+    }
+
+    // ---------- Animation de notification ----------
+
+    private Image? _notifyImage;
+    private GifAnimation? _notifyGif;
+    private bool _notifyPending;
+    private bool _notifyPlaying;
+
+    /// <summary>GIF de base fourni avec l'app.</summary>
+    public static string BundledNotificationGif => System.IO.Path.Combine(AppContext.BaseDirectory, "notification.gif");
+
+    /// <summary>Recharge le GIF choisi dans les paramètres (vide = celui fourni avec l'app).</summary>
+    public void ReloadNotificationGif()
+    {
+        var path = string.IsNullOrEmpty(_c.Settings.NotificationGifPath) ? BundledNotificationGif : _c.Settings.NotificationGifPath;
+        _notifyGif = GifAnimation.Load(path, MainSize * 4);
+        _notifyPlaying = false;
+        UpdateNotifyAnimation();
+    }
+
+    /// <summary>Le GIF tourne en boucle tant qu'un message n'a pas été vu (cascade repliée).</summary>
+    private void UpdateNotifyAnimation()
+    {
+        if (_notifyImage == null) return;
+        bool play = _notifyPending && !IsOpen && _c.Settings.NotifyAnimation && _notifyGif != null;
+        if (play == _notifyPlaying) return;
+        _notifyPlaying = play;
+        if (play) _notifyGif!.Play(_notifyImage, true);
+        else _notifyImage.BeginAnimation(Image.SourceProperty, null);
+        _notifyImage.Visibility = play ? Visibility.Visible : Visibility.Collapsed;
     }
 
     internal static Border MakeBadge()
@@ -485,12 +527,30 @@ public sealed class LauncherWindow : Window
         el.BeginAnimation(OpacityProperty, fade);
     }
 
+    /// <summary>Logo de la bulle principale : un rond blanc cerclé de noir avec une silhouette, en vectoriel (net à toute taille).</summary>
+    private static readonly DrawingImage MainLogo = Frozen(new DrawingImage(new DrawingGroup
+    {
+        Children =
+        {
+            new GeometryDrawing(Brushes.Black, null, new EllipseGeometry(new Point(620, 620), 597, 597)),
+            new GeometryDrawing(Frozen(new SolidColorBrush(Color.FromRgb(0xF7, 0xF7, 0xF7))), null, new EllipseGeometry(new Point(620, 620), 520, 520)),
+            new GeometryDrawing(Brushes.Black, null, Geometry.Parse(
+                "M588,411 L657,411 722,476 722,540 717,545 717,612 674,655 674,693 855,738 878,840 " +
+                "368,840 386,742 570,693 570,657 527,614 527,560 521,555 521,476 Z")),
+        },
+    }));
+
     private Grid CreateMainBubble()
     {
         var g = new Grid { Width = MainSize, Height = MainSize, Cursor = Cursors.Hand, ToolTip = "Bubulle" };
-        g.Children.Add(new Ellipse { Fill = AccentBrush });
-        g.Children.Add(new Ellipse { Stroke = Brushes.White, StrokeThickness = 2.5, Margin = new Thickness(3) });
-        g.Children.Add(new Ellipse { Fill = Brushes.White, Width = 16, Height = 16 });
+        g.Children.Add(new Image { Source = MainLogo, Stretch = Stretch.Uniform });
+        _notifyImage = new Image
+        {
+            Stretch = Stretch.Uniform, IsHitTestVisible = false, Visibility = Visibility.Collapsed,
+            Clip = new EllipseGeometry(new Point(MainSize / 2.0, MainSize / 2.0), MainSize / 2.0, MainSize / 2.0),
+        };
+        RenderOptions.SetBitmapScalingMode(_notifyImage, BitmapScalingMode.HighQuality);
+        g.Children.Add(_notifyImage);
         _mainBadge = MakeBadge();
         g.Children.Add(_mainBadge);
         g.RenderTransformOrigin = new Point(0.5, 0.5);

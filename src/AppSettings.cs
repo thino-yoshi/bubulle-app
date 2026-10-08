@@ -93,6 +93,10 @@ public class AppSettings
     public string PreviousArrow { get; set; } = "";
     public bool SystemCursorApplied { get; set; }
 
+    /// <summary>GIF joué sur la bulle principale quand un message arrive (cascade repliée).</summary>
+    public bool NotifyAnimation { get; set; } = true;
+    public string NotificationGifPath { get; set; } = "";
+
     /// <summary>Sons d'interface : déploiement / repli des bulles.</summary>
     public bool SoundEnabled { get; set; } = true;
     public int SoundVolume { get; set; } = 70;
