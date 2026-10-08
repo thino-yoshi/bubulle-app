@@ -620,6 +620,27 @@ public sealed class AppController : IDisposable
         RegisterHotkeys();
     }
 
+    /// <summary>Range une bulle à une autre place dans la colonne (appui long puis glisser).</summary>
+    public void MoveBubble(BubbleConfig bubble, int newIndex)
+    {
+        var list = Settings.Bubbles;
+        int oldIndex = list.IndexOf(bubble);
+        newIndex = Math.Clamp(newIndex, 0, list.Count - 1);
+        if (oldIndex >= 0 && oldIndex != newIndex)
+        {
+            list.RemoveAt(oldIndex);
+            list.Insert(newIndex, bubble);
+            Settings.Save();
+        }
+        _launcher.Rebuild(replayOpen: false);
+        if (_current != null)
+        {
+            _launcher.SetActive(_current.Bubble);
+            // La bulle ouverte a peut-être changé de place : sa fenêtre la suit.
+            PlaceFrame(_current);
+        }
+    }
+
     public void RemoveBubble(BubbleConfig bubble)
     {
         if (_current?.Bubble == bubble) HideCurrent(restoreFocus: true, animate: false);

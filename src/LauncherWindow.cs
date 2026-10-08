@@ -7,6 +7,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Shapes;
+using System.Windows.Threading;
 using Forms = System.Windows.Forms;
 
 namespace Bulles;
@@ -25,6 +26,7 @@ public sealed class LauncherWindow : Window
     private static readonly Brush AccentBrush = Frozen(new SolidColorBrush(Accent));
     private static readonly Brush BubbleFill = Frozen(new SolidColorBrush(Color.FromArgb(0xE0, 0x16, 0x1A, 0x22)));
     private static readonly Brush RingBrush = Frozen(new SolidColorBrush(Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF)));
+    private static readonly Brush HoldBrush = Frozen(new SolidColorBrush(Color.FromRgb(0x9B, 0xDC, 0xFF)));
     private static readonly Brush BadgeBrush = Frozen(new SolidColorBrush(Color.FromRgb(0xF2, 0x3F, 0x43)));
 
     private readonly AppController _c;
@@ -86,7 +88,106 @@ public sealed class LauncherWindow : Window
 
     private double ClampY(double y) => Math.Clamp(y, MainSize / 2 + 8, Math.Max(MainSize / 2 + 8, Height - MainSize / 2 - 8));
 
-    public void Rebuild()
+    // ---------- Réorganiser les bulles (appui long puis glisser) ----------
+
+    private const int HoldMs = 550;
+    private BubbleVisual? _held;
+    private bool _reordering, _holdCancelled;
+    private Point _holdStart;
+    private int _dragIndex;
+    private DispatcherTimer? _holdTimer;
+
+    private void BeginHold(BubbleVisual v, BubbleConfig b, MouseButtonEventArgs e)
+    {
+        _held = v;
+        _reordering = false;
+        _holdCancelled = false;
+        _holdStart = e.GetPosition(this);
+        v.CaptureMouse();
+        v.StartHoldRing(TimeSpan.FromMilliseconds(HoldMs));
+        _holdTimer?.Stop();
+        _holdTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(HoldMs) };
+        _holdTimer.Tick += (_, _) =>
+        {
+            _holdTimer!.Stop();
+            if (_held != v || _holdCancelled) return;
+            // Contour plein : la bulle se décroche et suit la souris.
+            _reordering = true;
+            _dragIndex = _apps.IndexOf(v);
+            v.SetDragLook(true);
+            Panel.SetZIndex(v, 20);
+        };
+        _holdTimer.Start();
+        e.Handled = true;
+    }
+
+    private void OnHoldMove(BubbleVisual v, MouseEventArgs e)
+    {
+        if (_held != v) return;
+        var p = e.GetPosition(this);
+        if (!_reordering)
+        {
+            // La souris bouge avant la fin du chargement : on annule (ce n'était ni un clic ni un déplacement).
+            if (!_holdCancelled && (p - _holdStart).Length > 10)
+            {
+                _holdCancelled = true;
+                v.StopHoldRing();
+            }
+            return;
+        }
+
+        // La bulle suit la souris le long de la colonne ; les autres se décalent pour lui faire une place.
+        double first = TargetCenter(0), last = TargetCenter(_apps.Count - 1);
+        double y = Math.Clamp(p.Y, Math.Min(first, last), Math.Max(first, last));
+        v.BeginAnimation(Canvas.TopProperty, null);
+        Canvas.SetTop(v, y - v.Height / 2);
+
+        int target = Math.Clamp((int)Math.Round(Math.Abs(y - _mainY - (ExpandsDown ? FirstOffset : -FirstOffset)) / Spacing), 0, _apps.Count - 1);
+        if (target == _dragIndex) return;
+        _dragIndex = target;
+        int slot = 0;
+        foreach (var other in _apps)
+        {
+            if (other == v) continue;
+            if (slot == _dragIndex) slot++;
+            Animate(other, TargetCenter(slot), 1, 0, new QuadraticEase { EasingMode = EasingMode.EaseOut });
+            slot++;
+        }
+    }
+
+    private void EndHold(BubbleVisual v, BubbleConfig b)
+    {
+        if (_held != v) return;
+        _holdTimer?.Stop();
+        v.ReleaseMouseCapture();
+        v.StopHoldRing();
+        _held = null;
+
+        if (_reordering)
+        {
+            _reordering = false;
+            v.SetDragLook(false);
+            Panel.SetZIndex(v, 0);
+            _c.MoveBubble(b, _dragIndex);
+            return;
+        }
+        if (!_holdCancelled) _c.ToggleApp(b);
+    }
+
+    /// <summary>Après un déplacement : tout est remis en place sans rejouer l'animation de déploiement.</summary>
+    private void ShowInPlace()
+    {
+        int i = 0;
+        foreach (var el in AllItems())
+        {
+            el.BeginAnimation(OpacityProperty, null);
+            el.Visibility = Visibility.Visible;
+            el.Opacity = 1;
+            PlaceCenter(el, TargetCenter(i++));
+        }
+    }
+
+    public void Rebuild(bool replayOpen = true)
     {
         foreach (var el in AllItems()) _canvas.Children.Remove(el);
         _apps.Clear();
@@ -98,7 +199,10 @@ public sealed class LauncherWindow : Window
             var icon = BubbleFrame.IconFor(b);
             string? glyph = icon != null ? null : b.IsMixer ? MixerGlyph : b.Name[..1].ToUpperInvariant();
             var v = new BubbleVisual(AppSize, icon, glyph) { ToolTip = b.Name };
-            v.MouseLeftButtonUp += (_, _) => _c.ToggleApp(b);
+            // Clic court : ouvrir l'app. Appui long : le contour se remplit, puis la bulle se déplace.
+            v.MouseLeftButtonDown += (_, e) => BeginHold(v, b, e);
+            v.MouseMove += (_, e) => OnHoldMove(v, e);
+            v.MouseLeftButtonUp += (_, _) => EndHold(v, b);
             var menu = new ContextMenu();
             var remove = new MenuItem { Header = "Retirer la bulle" };
             remove.Click += (_, _) => _c.RemoveBubble(b);
@@ -115,7 +219,8 @@ public sealed class LauncherWindow : Window
             _canvas.Children.Add(el);
             Reset(el);
         }
-        if (IsOpen) Open();
+        if (IsOpen && replayOpen) Open();
+        else if (IsOpen) ShowInPlace();
     }
 
     private IEnumerable<BubbleVisual> AllItems()
@@ -378,8 +483,47 @@ public sealed class LauncherWindow : Window
         }
 
         private readonly Border _badge;
+        private Ellipse? _holdRing;
 
         public void SetBadge(int count) => UpdateBadge(_badge, count);
+
+        /// <summary>Anneau bleu clair qui se remplit autour de la bulle pendant l'appui long.</summary>
+        public void StartHoldRing(TimeSpan duration)
+        {
+            StopHoldRing();
+            const double thickness = 3;
+            // Longueur du tour en « épaisseurs de trait » (unité des pointillés WPF).
+            double perimeter = Math.PI * (Width - thickness) / thickness;
+            _holdRing = new Ellipse
+            {
+                Stroke = HoldBrush,
+                StrokeThickness = thickness,
+                StrokeDashArray = new DoubleCollection { perimeter, perimeter },
+                StrokeDashOffset = perimeter,
+                StrokeDashCap = PenLineCap.Round,
+                RenderTransformOrigin = new Point(0.5, 0.5),
+                RenderTransform = new RotateTransform(-90),
+                IsHitTestVisible = false,
+            };
+            Children.Add(_holdRing);
+            _holdRing.BeginAnimation(Shape.StrokeDashOffsetProperty, new DoubleAnimation(perimeter, 0, duration));
+        }
+
+        public void StopHoldRing()
+        {
+            if (_holdRing == null) return;
+            Children.Remove(_holdRing);
+            _holdRing = null;
+        }
+
+        /// <summary>Bulle « décrochée » : un peu plus grosse, contour bleu clair.</summary>
+        public void SetDragLook(bool dragging)
+        {
+            Scale(this, dragging ? 1.18 : 1);
+            _ring.Stroke = dragging ? HoldBrush : RingBrush;
+            _ring.StrokeThickness = dragging ? 2.5 : 1.2;
+            StopHoldRing();
+        }
 
         public void SetActive(bool active)
         {
