@@ -35,7 +35,12 @@ public static class Updater
 
         using var doc = JsonDocument.Parse(await http.GetStringAsync($"https://api.github.com/repos/{Repo}/releases/latest"));
         var tag = doc.RootElement.GetProperty("tag_name").GetString() ?? "";
-        if (!Version.TryParse(tag.TrimStart('v', 'V'), out var latest) || latest <= Current) return null;
+        if (!Version.TryParse(tag.TrimStart('v', 'V'), out var latest) || latest <= Current)
+        {
+            Log($"Vérifié : dernière version {tag}, installée v{Current} → à jour.");
+            return null;
+        }
+        Log($"Nouvelle version {tag} (installée v{Current}) : téléchargement.");
 
         // Le paquet de mise à jour : le .zip de l'app (l'installateur .exe sert aux nouvelles installations).
         var asset = doc.RootElement.GetProperty("assets").EnumerateArray()
@@ -54,10 +59,31 @@ public static class Updater
             if (Directory.Exists(folder)) Directory.Delete(folder, true);
             ZipFile.ExtractToDirectory(zip, folder);
             File.Delete(zip);
-            if (!File.Exists(Path.Combine(folder, "Bubulle.exe"))) return null;
+            if (!File.Exists(Path.Combine(folder, "Bubulle.exe")))
+            {
+                Log("Paquet téléchargé mais incomplet (Bubulle.exe absent).");
+                return null;
+            }
         }
         Ready = (latest, folder);
+        Log($"v{latest} prête à installer.");
         return latest;
+    }
+
+    /// <summary>Journal des mises à jour (%APPDATA%\Bubulle\update\update.log), pour comprendre un blocage.</summary>
+    public static void Log(string message)
+    {
+        try
+        {
+            Directory.CreateDirectory(Root);
+            var file = Path.Combine(Root, "update.log");
+            if (File.Exists(file) && new FileInfo(file).Length > 200_000) File.Delete(file);
+            File.AppendAllText(file, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {message}\n");
+        }
+        catch
+        {
+            // Le journal ne doit jamais empêcher la mise à jour.
+        }
     }
 
     /// <summary>
@@ -72,14 +98,32 @@ public static class Updater
         var script = Path.Combine(Root, "install.ps1");
         // Chemins entre apostrophes PowerShell : une apostrophe dans un nom de dossier se double.
         static string Q(string s) => s.Replace("'", "''");
+        // Le script note tout dans install.log, réessaie si des fichiers sont encore occupés,
+        // et relance toujours Bubulle à la fin (même si la copie a échoué : on réessaiera au lancement suivant).
         File.WriteAllText(script, $$"""
-            $ErrorActionPreference = 'Stop'
-            try { Wait-Process -Id {{Environment.ProcessId}} -Timeout 30 } catch {}
-            Start-Sleep -Milliseconds 500
-            Copy-Item -Path '{{Q(ready.Folder)}}\*' -Destination '{{Q(appDir)}}' -Recurse -Force
-            Remove-Item -Path '{{Q(ready.Folder)}}' -Recurse -Force -ErrorAction SilentlyContinue
+            $log = '{{Q(Path.Combine(Root, "install.log"))}}'
+            function Note($m) { Add-Content -Path $log -Value ("[{0:yyyy-MM-dd HH:mm:ss}] {1}" -f (Get-Date), $m) }
+            Note 'Installation de v{{ready.Version}} dans {{Q(appDir)}}'
+            try { Wait-Process -Id {{Environment.ProcessId}} -Timeout 30 -ErrorAction Stop } catch {}
+            $ok = $false
+            for ($i = 0; $i -lt 30 -and -not $ok; $i++) {
+                try {
+                    Copy-Item -Path '{{Q(ready.Folder)}}\*' -Destination '{{Q(appDir)}}' -Recurse -Force -ErrorAction Stop
+                    $ok = $true
+                } catch {
+                    Note ("Fichiers occupés, nouvel essai : " + $_.Exception.Message)
+                    Start-Sleep -Seconds 1
+                }
+            }
+            if ($ok) {
+                Remove-Item -Path '{{Q(ready.Folder)}}' -Recurse -Force -ErrorAction SilentlyContinue
+                Note 'Installation réussie.'
+            } else {
+                Note 'Échec : la mise à jour sera retentée au prochain lancement.'
+            }
             Start-Process -FilePath '{{Q(exe)}}'
-            """);
+            """, new System.Text.UTF8Encoding(true));
+        Log($"Installation de v{ready.Version} lancée.");
         Process.Start(new ProcessStartInfo("powershell.exe", $"-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"{script}\"")
         {
             UseShellExecute = false,

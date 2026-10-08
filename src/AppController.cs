@@ -92,6 +92,9 @@ public sealed class AppController : IDisposable
         HwndSource.FromHwnd(launcherHwnd)!.AddHook(ShellHook);
         if (Settings.PreloadWeb) _ = PreloadWebBubbles();
         _ = CheckForUpdate(TimeSpan.FromSeconds(20), quiet: true);
+        // Bubulle reste souvent ouvert des jours : on revérifie toutes les 3 heures.
+        _updateTimer.Tick += async (_, _) => { if (Updater.Ready == null) await CheckForUpdate(TimeSpan.Zero, quiet: true); };
+        _updateTimer.Start();
     }
 
     // ---------- Pastilles de notification ----------
@@ -955,6 +958,7 @@ public sealed class AppController : IDisposable
     // ---------- Mises à jour (GitHub) ----------
 
     private Forms.ToolStripMenuItem? _updateMenuItem;
+    private readonly System.Windows.Threading.DispatcherTimer _updateTimer = new() { Interval = TimeSpan.FromHours(3) };
     private bool _updateBalloonShown;
 
     /// <summary>Texte d'état pour les paramètres.</summary>
@@ -986,8 +990,9 @@ public sealed class AppController : IDisposable
         }
         catch (Exception ex)
         {
-            // Pas d'internet, GitHub indisponible… On réessaiera au prochain lancement.
+            // Pas d'internet, GitHub indisponible… On réessaiera plus tard.
             App.Log(ex);
+            Updater.Log("Vérification impossible : " + ex.Message);
             UpdateStatus = "Impossible de vérifier les mises à jour pour l'instant.";
             if (!quiet) Notify(UpdateStatus);
         }
