@@ -126,6 +126,7 @@ public sealed class LauncherWindow : Window
 
     public void Open()
     {
+        if (!IsOpen) _c.Sounds.PlayOpen();
         IsOpen = true;
         Native.SetWindowPos(new WindowInteropHelper(this).Handle, Native.HWND_TOPMOST, 0, 0, 0, 0,
             Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
@@ -140,6 +141,7 @@ public sealed class LauncherWindow : Window
 
     public void Close(bool animated = true)
     {
+        if (IsOpen && animated) _c.Sounds.PlayClose();
         IsOpen = false;
         foreach (var el in AllItems())
         {

@@ -55,6 +55,12 @@ public class AppSettings
     public double MiniWidth { get; set; }
     public double MiniHeight { get; set; }
 
+    /// <summary>Sons d'interface : déploiement / repli des bulles.</summary>
+    public bool SoundEnabled { get; set; } = true;
+    public int SoundVolume { get; set; } = 70;
+    public string OpenSoundPath { get; set; } = "";
+    public string CloseSoundPath { get; set; } = "";
+
     /// <summary>Charge les sites web en arrière-plan au démarrage (pastilles de notification).</summary>
     public bool PreloadWeb { get; set; } = true;
     public bool StartWithWindows { get; set; }

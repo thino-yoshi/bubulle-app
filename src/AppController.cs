@@ -42,9 +42,12 @@ public sealed class AppController : IDisposable
     private Task<CoreWebView2Environment>? _webEnv;
     private bool _busy, _disposed;
 
+    public Sounds Sounds { get; }
+
     public AppController(AppSettings settings)
     {
         Settings = settings;
+        Sounds = new Sounds(settings);
 
         _launcher = new LauncherWindow(this);
         _launcher.Show();
@@ -671,6 +674,7 @@ public sealed class AppController : IDisposable
         _settingsWindow.Saved += () =>
         {
             if (Settings.StartWithWindows != startupBefore) ApplyStartup();
+            Sounds.Reload();
             CloseLauncher();
             _launcher.UpdatePlacement();
             _launcher.Rebuild();

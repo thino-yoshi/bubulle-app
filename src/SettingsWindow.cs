@@ -63,6 +63,10 @@ public sealed class SettingsWindow : Window
 
     public event Action? Saved;
 
+    private readonly CheckBox _soundOn;
+    private readonly Slider _soundVolume;
+    private string _openSound, _closeSound;
+
     public SettingsWindow(AppSettings settings)
     {
         _s = settings;
@@ -110,6 +114,16 @@ public sealed class SettingsWindow : Window
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 10, 0, 0),
         });
+
+        root.Children.Add(Section("Sons"));
+        _openSound = _s.OpenSoundPath;
+        _closeSound = _s.CloseSoundPath;
+        _soundOn = new CheckBox { Content = "Jouer un son quand les bulles se déploient / se replient", IsChecked = _s.SoundEnabled };
+        root.Children.Add(_soundOn);
+        _soundVolume = MakeSlider(0, 100, _s.SoundVolume);
+        root.Children.Add(Row("Volume des sons", SliderWithValue(_soundVolume, "%")));
+        root.Children.Add(SoundRow("Son de déploiement", () => _openSound, p => _openSound = p, "open"));
+        root.Children.Add(SoundRow("Son de repli", () => _closeSound, p => _closeSound = p, "close"));
 
         root.Children.Add(Section("Bulles"));
         _perBubble = new CheckBox { Content = "Raccourci clavier par bulle", IsChecked = _s.PerBubbleHotkeys, Margin = new Thickness(0, 0, 0, 8) };
@@ -184,6 +198,10 @@ public sealed class SettingsWindow : Window
         _s.DefaultHeightPct = (int)_height.Value;
         _s.AutoHide = _autoHide.IsChecked == true;
         _s.PreloadWeb = _preload.IsChecked == true;
+        _s.SoundEnabled = _soundOn.IsChecked == true;
+        _s.SoundVolume = (int)_soundVolume.Value;
+        _s.OpenSoundPath = _openSound;
+        _s.CloseSoundPath = _closeSound;
         _s.StartWithWindows = _startup.IsChecked == true;
         if (_screen.SelectedItem is ComboBoxItem { Tag: string device }) _s.Screen = device;
         _s.PerBubbleHotkeys = _perBubble.IsChecked == true;
@@ -196,6 +214,46 @@ public sealed class SettingsWindow : Window
         _s.Save();
         Saved?.Invoke();
         Close();
+    }
+
+    /// <summary>Ligne « son » : nom du fichier, Choisir… (copié dans Bulles), Tester, Retirer.</summary>
+    private DockPanel SoundRow(string label, Func<string> get, Action<string> set, string importName)
+    {
+        var file = new TextBlock { Foreground = Brushes.Gray, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 8, 0), TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 140 };
+        void Refresh() => file.Text = string.IsNullOrEmpty(get()) ? "Aucun" : System.IO.Path.GetFileName(get());
+        Refresh();
+
+        var choose = new Button { Content = "Choisir…", Padding = new Thickness(8, 2, 8, 2) };
+        var test = new Button { Content = "▶", ToolTip = "Écouter", Padding = new Thickness(8, 2, 8, 2), Margin = new Thickness(4, 0, 0, 0) };
+        var clear = new Button { Content = "✕", ToolTip = "Pas de son", Padding = new Thickness(8, 2, 8, 2), Margin = new Thickness(4, 0, 0, 0) };
+        choose.Click += (_, _) =>
+        {
+            var dialog = new Microsoft.Win32.OpenFileDialog
+            {
+                Title = label,
+                Filter = "Sons (*.wav, *.mp3, *.m4a, *.wma, *.aac)|*.wav;*.mp3;*.m4a;*.wma;*.aac",
+                InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) + "\\Downloads",
+            };
+            if (dialog.ShowDialog(this) != true) return;
+            try { set(Sounds.Import(dialog.FileName, importName)); }
+            catch (Exception ex) { App.Log(ex); MessageBox.Show(this, "Impossible de copier ce son.", "Bulles"); }
+            Refresh();
+        };
+        test.Click += (_, _) =>
+        {
+            if (string.IsNullOrEmpty(get()) || !System.IO.File.Exists(get())) return;
+            var preview = new MediaPlayer { Volume = _soundVolume.Value / 100.0 };
+            preview.Open(new Uri(get()));
+            preview.Play();
+        };
+        clear.Click += (_, _) => { set(""); Refresh(); };
+
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal };
+        buttons.Children.Add(file);
+        buttons.Children.Add(choose);
+        buttons.Children.Add(test);
+        buttons.Children.Add(clear);
+        return Row(label, buttons);
     }
 
     private static TextBlock Section(string text) => new()
