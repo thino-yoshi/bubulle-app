@@ -455,6 +455,30 @@ public sealed class BubbleFrame : Window
             long ex = Native.GetExStyle(h);
             Native.SetExStyle(h, ClickThrough ? ex | Native.WS_EX_TRANSPARENT | Native.WS_EX_LAYERED : ex & ~Native.WS_EX_TRANSPARENT);
         }
+        SetDropTarget(!ClickThrough);
+    }
+
+    private bool _dropRevoked;
+
+    /// <summary>
+    /// Bulle traversable : elle n'accepte plus les fichiers glissés (Windows les lui donnait quand même,
+    /// par exemple à une page YouTube). Le dépôt arrive alors au jeu ou à l'app en dessous.
+    /// </summary>
+    private void SetDropTarget(bool accept)
+    {
+        if (_web != null) _web.AllowExternalDrop = accept;
+        if (accept == !_dropRevoked || Hwnd == IntPtr.Zero) return;
+        try
+        {
+            var method = typeof(DragDrop).GetMethod(accept ? "RegisterDropTarget" : "RevokeDropTarget",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+            method?.Invoke(null, new object[] { Hwnd });
+            _dropRevoked = !accept;
+        }
+        catch (Exception ex)
+        {
+            App.Log(ex);
+        }
     }
 
     /// <summary>Charge la page web en arrière-plan, sans l'afficher : les pastilles de notification marchent dès le démarrage.</summary>
@@ -556,6 +580,20 @@ public sealed class BubbleFrame : Window
     // ---------- Mélangeur audio ----------
 
     /// <summary>Le mélangeur audio de Bulles, dessiné directement dans la bulle.</summary>
+    /// <summary>Explorateur façon SAO (option test des paramètres), à la place de l'explorateur Windows.</summary>
+    public void InitExplorer()
+    {
+        if (_host.Child is ExplorerView) return;
+        // La fenêtre de l'explorateur Windows était gardée dans cette bulle : on la rend.
+        if (HasParkedNative) DetachNative(minimize: true);
+        _host.Child = new ExplorerView(_c, () => _c.HideFrame(this));
+        UseSaoChrome();
+    }
+
+    public bool IsExplorer => _host.Child is ExplorerView;
+
+    public void FocusExplorer() => (_host.Child as ExplorerView)?.Focus();
+
     public void InitMixer()
     {
         if (_host.Child is MixerView) return;
@@ -709,6 +747,18 @@ public sealed class BubbleFrame : Window
             _c.HideFrame(this);
             return;
         }
+        // Plein écran de l'app (stream Discord, vidéo…) : on la laisse faire, sans la forcer dans le cadre
+        // (sinon la bulle croit que l'app refuse de rétrécir et grandit à la taille de l'écran).
+        if (CoversItsMonitor(_native))
+        {
+            if (!_nativeFullscreen)
+            {
+                _nativeFullscreen = true;
+                _beforeFullscreen = new Rect(Left, Top, Width, Height);
+            }
+            return;
+        }
+        if (_nativeFullscreen) LeaveNativeFullscreen();
         // L'app s'est ré-agrandie toute seule : on la remet à sa place dans le cadre.
         if (Native.IsZoomed(_native)) Native.ShowWindow(_native, Native.SW_RESTORE);
         if (_host.ActualWidth < 1) return;
@@ -761,6 +811,44 @@ public sealed class BubbleFrame : Window
     private bool _resyncing;
 
     private bool _enforcing;
+
+    private bool _nativeFullscreen;
+    private Rect _beforeFullscreen;
+
+    /// <summary>La fenêtre couvre tout son écran (plein écran) ? La bulle, elle, ne le fait jamais.</summary>
+    private static bool CoversItsMonitor(IntPtr hwnd)
+    {
+        if (!Native.GetWindowRect(hwnd, out var r)) return false;
+        var screen = System.Windows.Forms.Screen.FromHandle(hwnd).Bounds;
+        return r.Left <= screen.Left && r.Top <= screen.Top && r.Right >= screen.Right && r.Bottom >= screen.Bottom;
+    }
+
+    /// <summary>
+    /// Fin du plein écran : la bulle reprend sa taille d'avant (et ses tailles minimales normales),
+    /// et l'app perd à nouveau sa barre de titre si elle l'a remise en sortant du plein écran.
+    /// </summary>
+    private void LeaveNativeFullscreen()
+    {
+        _nativeFullscreen = false;
+        _enforcing = true;
+        try
+        {
+            MinWidth = DefaultMinWidth;
+            MinHeight = DefaultMinHeight;
+            Left = _beforeFullscreen.Left;
+            Top = _beforeFullscreen.Top;
+            Width = _beforeFullscreen.Width;
+            Height = _beforeFullscreen.Height;
+        }
+        finally
+        {
+            _enforcing = false;
+        }
+        Native.SetStyle(_native, Native.GetStyle(_native) & ~(Native.WS_CAPTION | Native.WS_THICKFRAME | Native.WS_MAXIMIZE));
+        Native.SetWindowPos(_native, Native.HWND_TOPMOST, 0, 0, 0, 0,
+            Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE | Native.SWP_FRAMECHANGED);
+        UpdateLayout();
+    }
 
     private void RaiseNative()
     {

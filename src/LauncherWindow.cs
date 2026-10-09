@@ -289,6 +289,7 @@ public sealed class LauncherWindow : Window
             v.MouseLeftButtonDown += (_, e) => BeginHold(v, b, e);
             v.MouseMove += (_, e) => OnHoldMove(v, e);
             v.MouseLeftButtonUp += (_, _) => EndHold(v, b);
+            OpenOnDragHover(v, () => _c.OpenForDrop(b));
             var menu = new ContextMenu();
             if (b.IsWindowApp)
             {
@@ -762,6 +763,7 @@ public sealed class LauncherWindow : Window
             g.CaptureMouse();
         };
         g.MouseMove += (_, e) => OnMainDrag(e);
+        OpenOnDragHover(g, () => { if (!IsOpen) Open(); });
         g.MouseLeftButtonUp += (_, _) =>
         {
             g.ReleaseMouseCapture();
@@ -816,6 +818,38 @@ public sealed class LauncherWindow : Window
             _c.Settings.MainY = _mainY / Height;
             UpdatePlacement();
         }
+    }
+
+    /// <summary>
+    /// Glisser-déposer entre bulles : tenir un fichier (ou un texte, une image…) au-dessus d'une bulle
+    /// pendant un court instant l'ouvre, comme les boutons de la barre des tâches de Windows.
+    /// La bulle principale, elle, déploie la cascade.
+    /// </summary>
+    private static void OpenOnDragHover(FrameworkElement target, Action open)
+    {
+        target.AllowDrop = true;
+        DispatcherTimer? timer = null;
+        void Stop()
+        {
+            timer?.Stop();
+            timer = null;
+        }
+        target.DragEnter += (_, e) =>
+        {
+            e.Effects = DragDropEffects.None;
+            e.Handled = true;
+            Stop();
+            timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(450) };
+            timer.Tick += (_, _) =>
+            {
+                Stop();
+                open();
+            };
+            timer.Start();
+        };
+        target.DragOver += (_, e) => { e.Effects = DragDropEffects.None; e.Handled = true; };
+        target.DragLeave += (_, _) => Stop();
+        target.Drop += (_, e) => { Stop(); e.Handled = true; };
     }
 
     private static T Frozen<T>(T freezable) where T : Freezable

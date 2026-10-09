@@ -95,6 +95,7 @@ public sealed class SettingsView : UserControl
         Add(card, Toggle("Lancer Bubulle au démarrage de Windows", null, _s.StartWithWindows, v => { _s.StartWithWindows = v; _s.Save(); _c.ApplyStartupSetting(); }));
         Add(card, Toggle("Cacher la fenêtre quand je clique ailleurs", "Par exemple en revenant au jeu (sauf si elle est épinglée).", _s.AutoHide, v => { _s.AutoHide = v; _s.Save(); }));
         Add(card, Toggle("Garder les sites web connectés en arrière-plan", "Pastilles de messages dès le démarrage. Prend effet au prochain lancement.", _s.PreloadWeb, v => { _s.PreloadWeb = v; _s.Save(); }));
+        Add(card, SaoExplorerToggle());
         _root.Children.Add(card.Border);
     }
 
@@ -380,6 +381,38 @@ public sealed class SettingsView : UserControl
             texts.Children.Add(new TextBlock { Text = description, Foreground = TextSoft, FontSize = 11.5, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 0) });
         row.Children.Add(texts);
         return row;
+    }
+
+    /// <summary>Option test : explorateur façon SAO. À l'activation, un message explique ce qui change.</summary>
+    private DockPanel SaoExplorerToggle()
+    {
+        var toggle = new CheckBox { Style = Theme.Toggle, IsChecked = _s.SaoExplorer };
+        bool reverting = false;
+        toggle.Checked += (_, _) =>
+        {
+            if (reverting) return;
+            var dialog = new ChoiceDialog(
+                "Explorateur façon SAO (test)",
+                "Ta bulle « Explorateur de fichiers » n'ouvrira plus l'explorateur Windows, mais un explorateur dessiné par Bubulle, "
+                    + "comme le menu de SAO :\n\n"
+                    + "• Au départ, les mêmes dossiers que la colonne de gauche de ton explorateur (accès rapide, OneDrive, Ce PC).\n"
+                    + "• Un clic sur un dossier l'ouvre dans une nouvelle liste à côté ; l'ancienne passe en gris, le dossier ouvert en orange.\n"
+                    + "• Un clic sur une liste grise y revient. La molette fait tourner la liste.\n"
+                    + "• Un fichier : un clic pour le choisir, un deuxième pour le lancer.\n"
+                    + "• La croix rose ferme tout.\n\n"
+                    + "Tu peux revenir à l'explorateur Windows à tout moment en coupant cette option.",
+                "Activer", "Annuler");
+            dialog.ShowDialog();
+            if (dialog.Result == 1) _c.SetSaoExplorer(true);
+            else
+            {
+                reverting = true;
+                toggle.IsChecked = false;
+                reverting = false;
+            }
+        };
+        toggle.Unchecked += (_, _) => { if (!reverting) _c.SetSaoExplorer(false); };
+        return Row("Explorateur de fichiers façon SAO (test)", "Ta bulle Explorateur ouvre un explorateur style menu de SAO au lieu de celui de Windows.", toggle);
     }
 
     private static DockPanel Toggle(string label, string? description, bool value, Action<bool> changed)

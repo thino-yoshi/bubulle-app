@@ -78,6 +78,9 @@ public class AppSettings
 
     /// <summary>Profil « bureau » : les apps s'ouvrent en fenêtre Windows normale (les sites restent en bulle).</summary>
     public bool DesktopMode { get; set; }
+
+    /// <summary>Test : l'explorateur de fichiers s'ouvre façon menu de SAO, dessiné par Bubulle.</summary>
+    public bool SaoExplorer { get; set; }
     public bool PerBubbleHotkeys { get; set; }
     public string Side { get; set; } = "Right";
 

@@ -291,6 +291,15 @@ public sealed class AppController : IDisposable
 
     public async void ToggleApp(BubbleConfig bubble) => await ToggleAppAsync(bubble, fromHotkey: false);
 
+    /// <summary>Un fichier est glissé au-dessus d'une bulle : on l'ouvre pour pouvoir le déposer dedans.</summary>
+    public void OpenForDrop(BubbleConfig bubble)
+    {
+        if (_busy || _current?.Bubble == bubble || bubble.IsLauncher || bubble.IsMixer) return;
+        ToggleApp(bubble);
+    }
+
+    public bool IsCascadeOpen => _launcher.IsOpen;
+
     private async Task ToggleAppAsync(BubbleConfig bubble, bool fromHotkey, bool forceBubble = false)
     {
         if (_busy || !Settings.Bubbles.Contains(bubble)) return;
@@ -310,7 +319,7 @@ public sealed class AppController : IDisposable
         }
 
         // Mode bureau : l'app s'ouvre en fenêtre normale (sauf si elle est déjà dans sa bulle).
-        if (bubble.IsWindowApp && Settings.DesktopMode && !forceBubble && !IsInBubble(bubble))
+        if (bubble.IsWindowApp && Settings.DesktopMode && !forceBubble && !IsInBubble(bubble) && !IsSaoExplorer(bubble))
         {
             OpenNormally(bubble);
             return;
@@ -326,7 +335,8 @@ public sealed class AppController : IDisposable
         try
         {
             ClearActivity(bubble);
-            if (bubble.IsWeb) await ShowWeb(bubble);
+            if (IsSaoExplorer(bubble)) await ShowExplorer(bubble);
+            else if (bubble.IsWeb) await ShowWeb(bubble);
             else if (bubble.IsMixer) await ShowMixer(bubble);
             else if (bubble.IsLauncher) await ShowLauncherBubble(bubble);
             else await ShowApp(bubble);
@@ -611,6 +621,39 @@ public sealed class AppController : IDisposable
         catch (Exception ex) { App.Log(ex); }
     }
 
+    // ---------- Explorateur façon SAO (option test) ----------
+
+    /// <summary>La bulle de l'explorateur Windows, quand l'option « Explorateur façon SAO » est activée.</summary>
+    private bool IsSaoExplorer(BubbleConfig bubble) =>
+        Settings.SaoExplorer && bubble.IsWindowApp && bubble.ProcessName.Equals("explorer", StringComparison.OrdinalIgnoreCase);
+
+    private async Task ShowExplorer(BubbleConfig bubble)
+    {
+        var frame = await GetReadyFrame(bubble);
+        frame.InitExplorer();
+        PlaceFrame(frame);
+        frame.Show();
+        Activate(frame);
+        frame.FocusExplorer();
+        await frame.FadeInAsync();
+    }
+
+    /// <summary>Paramètres : active ou coupe l'explorateur façon SAO (les bulles concernées sont refaites).</summary>
+    public void SetSaoExplorer(bool on)
+    {
+        Settings.SaoExplorer = on;
+        Settings.Save();
+        foreach (var (bubble, frame) in _frames.Where(kv => kv.Value.IsExplorer || (kv.Key.IsWindowApp &&
+                     kv.Key.ProcessName.Equals("explorer", StringComparison.OrdinalIgnoreCase))).ToList())
+        {
+            if (_current == frame) HideCurrent(restoreFocus: false, animate: false);
+            _floating.Remove(frame);
+            frame.DisposeContent();
+            frame.Close();
+            _frames.Remove(bubble);
+        }
+    }
+
     private async Task ShowMixer(BubbleConfig bubble)
     {
         var frame = await GetReadyFrame(bubble);
@@ -693,6 +736,7 @@ public sealed class AppController : IDisposable
         // Lanceur façon SAO : taille fixe, les panneaux se placent dedans.
         if (b.IsLauncher) (width, height) = (LauncherView.ViewWidth, Math.Min(LauncherView.ViewHeight, wa.Height - 2 * FrameGap));
         else if (b.IsMixer) (width, height) = (MixerView.ViewWidth, Math.Min(MixerView.ViewHeight, wa.Height - 2 * FrameGap));
+        else if (frame.IsExplorer) (width, height) = (ExplorerView.ViewWidth, Math.Min(ExplorerView.ViewHeight, wa.Height - 2 * FrameGap));
         frame.Width = width;
         frame.Height = height;
         // Un petit écart avec la bande : la flèche orange de la bulle active s'y glisse.
@@ -757,7 +801,7 @@ public sealed class AppController : IDisposable
 
         // Mémorise la taille et l'opacité réglées pour cette bulle.
         var b = frame.Bubble;
-        if (frame.ActualWidth > 0 && !b.IsLauncher && !b.IsMixer)
+        if (frame.ActualWidth > 0 && !b.IsLauncher && !b.IsMixer && !frame.IsExplorer)
         {
             b.Width = (int)Math.Round(frame.ActualWidth);
             b.Height = (int)Math.Round(frame.ActualHeight);
