@@ -95,6 +95,8 @@ public sealed class SettingsView : UserControl
         Add(card, Toggle("Lancer Bubulle au démarrage de Windows", null, _s.StartWithWindows, v => { _s.StartWithWindows = v; _s.Save(); _c.ApplyStartupSetting(); }));
         Add(card, Toggle("Cacher la fenêtre quand je clique ailleurs", "Par exemple en revenant au jeu (sauf si elle est épinglée).", _s.AutoHide, v => { _s.AutoHide = v; _s.Save(); }));
         Add(card, Toggle("Garder les sites web connectés en arrière-plan", "Pastilles de messages dès le démarrage. Prend effet au prochain lancement.", _s.PreloadWeb, v => { _s.PreloadWeb = v; _s.Save(); }));
+        Add(card, Toggle("Cacher la barre des tâches Windows", "Tant que Bubulle tourne, la barre ne réapparaît plus en bas de l'écran. Elle revient quand tu quittes Bubulle (ou via le menu de l'icône près de l'horloge).",
+            _s.HideTaskbar, v => _c.SetHideTaskbar(v)));
         Add(card, SaoExplorerToggle());
         _root.Children.Add(card.Border);
     }

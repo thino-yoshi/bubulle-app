@@ -120,11 +120,24 @@ public sealed class BubbleFrame : Window
         {
             var h = Hwnd;
             Native.SetExStyle(h, Native.GetExStyle(h) | Native.WS_EX_TOOLWINDOW);
+            // Alt+F4 sur une bulle-fenêtre : on la cache (comme la croix), au lieu de la détruire.
+            HwndSource.FromHwnd(h)?.AddHook(HideOnAltF4);
             _opacityPercent = (int)_opacity.Value;
         };
         LocationChanged += (_, _) => SyncNative();
         SizeChanged += (_, _) => SyncNative();
         Activated += (_, _) => RaiseNative();
+    }
+
+    private IntPtr HideOnAltF4(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        const int WM_SYSCOMMAND = 0x0112, SC_CLOSE = 0xF060;
+        if (msg == WM_SYSCOMMAND && (wParam.ToInt64() & 0xFFF0) == SC_CLOSE)
+        {
+            handled = true;
+            Dispatcher.BeginInvoke(() => _c.HideFrame(this));
+        }
+        return IntPtr.Zero;
     }
 
     public int OpacityPercent => _opacityPercent;

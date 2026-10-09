@@ -68,11 +68,26 @@ public sealed class LauncherWindow : Window
             // Fenêtre outil : absente d'Alt+Tab.
             var h = new WindowInteropHelper(this).Handle;
             Native.SetExStyle(h, Native.GetExStyle(h) | Native.WS_EX_TOOLWINDOW);
+            // Alt+F4 pendant que la bande a le focus (après un clic sur une bulle) : ignoré, sinon c'est
+            // tout Bubulle qui se fermait. Une vraie demande de fermeture (mise à jour, Windows) passe toujours.
+            HwndSource.FromHwnd(h)?.AddHook(IgnoreAltF4);
         };
         DpiChanged += (_, _) => UpdatePlacement();
         // Demande de fermeture externe (mise à jour, fermeture de session) : on quitte proprement
         // pour rendre les fenêtres gardées dans les bulles.
-        Closing += (_, _) => _c.Quit();
+        Closing += (_, _) =>
+        {
+            App.Session("Demande de fermeture reçue (mise à jour, Windows ou autre programme)");
+            _c.Quit();
+        };
+    }
+
+    /// <summary>Alt+F4 arrive en WM_SYSCOMMAND / SC_CLOSE ; une fermeture par programme arrive en WM_CLOSE direct.</summary>
+    internal static IntPtr IgnoreAltF4(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        const int WM_SYSCOMMAND = 0x0112, SC_CLOSE = 0xF060;
+        if (msg == WM_SYSCOMMAND && (wParam.ToInt64() & 0xFFF0) == SC_CLOSE) handled = true;
+        return IntPtr.Zero;
     }
 
     private bool ExpandsDown => _mainY < Height / 2;
@@ -785,7 +800,7 @@ public sealed class LauncherWindow : Window
         var settings = new MenuItem { Header = "Paramètres" };
         settings.Click += (_, _) => _c.OpenSettings();
         var quit = new MenuItem { Header = "Quitter Bubulle" };
-        quit.Click += (_, _) => _c.Quit();
+        quit.Click += (_, _) => { App.Session("Quitter (clic droit sur la bulle principale)"); _c.Quit(); };
         menu.Items.Add(settings);
         menu.Items.Add(quit);
         g.ContextMenu = menu;

@@ -79,6 +79,13 @@ public class AppSettings
     /// <summary>Profil « bureau » : les apps s'ouvrent en fenêtre Windows normale (les sites restent en bulle).</summary>
     public bool DesktopMode { get; set; }
 
+    /// <summary>Cacher la barre des tâches Windows tant que Bubulle tourne.</summary>
+    public bool HideTaskbar { get; set; }
+    /// <summary>La barre est actuellement cachée par Bubulle (pour la rendre si Bubulle s'est arrêté brutalement).</summary>
+    public bool TaskbarHiddenByBubulle { get; set; }
+    /// <summary>Réglage « masquer automatiquement la barre » d'origine, remis quand Bubulle rend la barre.</summary>
+    public bool TaskbarWasAutoHide { get; set; }
+
     /// <summary>Test : l'explorateur de fichiers s'ouvre façon menu de SAO, dessiné par Bubulle.</summary>
     public bool SaoExplorer { get; set; }
     public bool PerBubbleHotkeys { get; set; }

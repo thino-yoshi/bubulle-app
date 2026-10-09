@@ -48,6 +48,9 @@ public sealed class AppController : IDisposable
         Settings = settings;
         Sounds = new Sounds(settings);
         AppCursor.Apply(settings);
+        // Barre des tâches restée cachée après un arrêt brutal : rendue avant tout, puis recachée si l'option est active.
+        Taskbar = new TaskbarHider(settings);
+        Taskbar.RecoverIfNeeded();
 
         // Un lanceur est proposé de base (une seule fois : tu peux le retirer ensuite).
         if (!Settings.DefaultLauncherAdded)
@@ -95,10 +98,31 @@ public sealed class AppController : IDisposable
         Native.RegisterShellHookWindow(launcherHwnd);
         HwndSource.FromHwnd(launcherHwnd)!.AddHook(ShellHook);
         if (Settings.PreloadWeb) _ = PreloadWebBubbles();
+        if (Settings.HideTaskbar) ApplyTaskbar();
         _ = CheckForUpdate(TimeSpan.FromSeconds(20), quiet: true);
         // Bubulle reste souvent ouvert des jours : on revérifie toutes les 3 heures.
         _updateTimer.Tick += async (_, _) => { if (Updater.Ready == null) await CheckForUpdate(TimeSpan.Zero, quiet: true); };
         _updateTimer.Start();
+    }
+
+    // ---------- Barre des tâches ----------
+
+    public TaskbarHider Taskbar { get; }
+
+    public void SetHideTaskbar(bool hide)
+    {
+        Settings.HideTaskbar = hide;
+        Settings.Save();
+        ApplyTaskbar();
+    }
+
+    /// <summary>Cache ou rend la barre, puis replace les bulles : la place libre de l'écran a changé.</summary>
+    private async void ApplyTaskbar()
+    {
+        Taskbar.Apply();
+        await Task.Delay(600);
+        _launcher.UpdatePlacement();
+        if (_current != null) PlaceFrame(_current);
     }
 
     // ---------- Pastilles de notification ----------
@@ -1265,7 +1289,9 @@ public sealed class AppController : IDisposable
             }
         };
         menu.Items.Add("Paramètres", null, (_, _) => OpenSettings());
-        menu.Items.Add("Quitter Bubulle", null, (_, _) => Quit());
+        // Sortie de secours : toujours un moyen de récupérer la barre des tâches.
+        menu.Items.Add("Afficher la barre des tâches", null, (_, _) => SetHideTaskbar(false));
+        menu.Items.Add("Quitter Bubulle", null, (_, _) => { App.Session("Quitter (menu de l'icône)"); Quit(); });
         var tray = new Forms.NotifyIcon
         {
             Icon = MakeTrayIcon(),
@@ -1331,6 +1357,7 @@ public sealed class AppController : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        Taskbar.Dispose();
         // Rend toujours les fenêtres empruntées dans leur état d'origine.
         HideCurrent(restoreFocus: false, animate: false);
         foreach (var frame in _frames.Values) frame.DisposeContent();
