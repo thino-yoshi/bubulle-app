@@ -98,6 +98,48 @@ public sealed class LauncherWindow : Window
 
     private BubbleVisual? _settings;
 
+    /// <summary>Engrenage noir à 8 grosses dents avec un trou au centre (logo des paramètres, dans les deux modes).</summary>
+    private static readonly DrawingImage GearLogo = Frozen(new DrawingImage(new DrawingGroup
+    {
+        Children =
+        {
+            // Cadre transparent plus grand que l'engrenage : il est dessiné un peu plus petit dans la bulle.
+            new GeometryDrawing(Brushes.Transparent, null, new RectangleGeometry(new Rect(-12, -12, 124, 124))),
+            new GeometryDrawing(Brushes.Black, null, Gear()),
+        },
+    }));
+
+    private static Geometry Gear()
+    {
+        const int teeth = 8;
+        const double outer = 50, root = 37, hole = 15;
+        var gear = new StreamGeometry();
+        using (var c = gear.Open())
+        {
+            // Chaque dent : un plateau sur le rayon extérieur, des flancs légèrement inclinés, un creux sur le rayon intérieur.
+            double step = 2 * Math.PI / teeth;
+            Point At(double r, double a) => new(50 + r * Math.Cos(a), 50 + r * Math.Sin(a));
+            for (int i = 0; i < teeth; i++)
+            {
+                // Décalé d'une demi-dent : un creux pile en haut (au nord).
+                double a = i * step - Math.PI / 2 + step / 2;
+                var points = new[]
+                {
+                    At(root, a - step * 0.30), At(outer, a - step * 0.20), At(outer, a + step * 0.20), At(root, a + step * 0.30),
+                };
+                if (i == 0) c.BeginFigure(points[0], true, true);
+                else c.LineTo(points[0], true, true);
+                c.LineTo(points[1], true, true);
+                c.LineTo(points[2], true, true);
+                c.LineTo(points[3], true, true);
+                c.ArcTo(At(root, a + step * 0.70), new Size(root, root), 0, false, SweepDirection.Clockwise, true, true);
+            }
+        }
+        var result = new CombinedGeometry(GeometryCombineMode.Exclude, gear, new EllipseGeometry(new Point(50, 50), hole, hole));
+        result.Freeze();
+        return result;
+    }
+
     /// <summary>Position de la bulle engrenage : de l'autre côté de la bulle principale que la cascade.</summary>
     private double SettingsCenter =>
         Math.Clamp(_mainY + (ExpandsDown ? -1 : 1) * FirstOffset, AppSize / 2 + 4, Height - AppSize / 2 - 4);
@@ -106,11 +148,11 @@ public sealed class LauncherWindow : Window
     {
         if (_settings == null)
         {
-            _settings = new BubbleVisual(AppSize, null, "") { ToolTip = "Paramètres" };
+            _settings = new BubbleVisual(AppSize, GearLogo, null) { ToolTip = "Paramètres" };
             _settings.MouseLeftButtonUp += (_, _) => _c.ToggleSettings();
             _canvas.Children.Add(_settings);
         }
-        _settings.SetActive(true);
+        _settings.SetMonochromeLook();
         _settings.Visibility = Visibility.Visible;
         PlaceCenter(_settings, _mainY);
         _settings.Opacity = 0;
@@ -877,6 +919,17 @@ public sealed class LauncherWindow : Window
             _ring.StrokeThickness = dragging ? 2.5 : 1.2;
             StopHoldRing();
         }
+
+        /// <summary>Bulle des paramètres : blanche cerclée de noir, engrenage noir (comme le logo de la bulle principale).</summary>
+        public void SetMonochromeLook()
+        {
+            _fill.Fill = MonoWhite;
+            _ring.Stroke = Brushes.Black;
+            _ring.StrokeThickness = 3.5;
+            if (_content is TextBlock text) text.Foreground = Brushes.Black;
+        }
+
+        private static readonly Brush MonoWhite = Frozen(new SolidColorBrush(Color.FromRgb(0xF7, 0xF7, 0xF7)));
 
         /// <summary>Bulle ouverte, façon SAO : remplie d'orange, cerclée de blanc puis d'orange.</summary>
         public void SetActive(bool active)
