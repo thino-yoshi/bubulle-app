@@ -23,6 +23,8 @@ public class BubbleConfig
 
     /// <summary>Contenu d'une bulle Lanceur.</summary>
     public List<LauncherApp> Apps { get; set; } = new();
+    /// <summary>Catégories créées dans le lanceur (en plus de Jeux, Apps et Sites, rangées automatiquement).</summary>
+    public List<LauncherCategory> Categories { get; set; } = new();
     public string Name { get; set; } = "";
     public string LaunchPath { get; set; } = "";
     public string ProcessName { get; set; } = "";
@@ -42,6 +44,9 @@ public class BubbleConfig
 
     /// <summary>Volume de la bulle en % (jauge du haut-parleur).</summary>
     public int Volume { get; set; } = 100;
+
+    /// <summary>Bulle provisoire (app lancée depuis un répertoire en mode Bubulle) : retirée au redémarrage.</summary>
+    public bool Temporary { get; set; }
 }
 
 /// <summary>Une app dans un lanceur : programme du PC ou site web (ouvert dans ton navigateur).</summary>
@@ -53,6 +58,15 @@ public class LauncherApp
     public string Url { get; set; } = "";
     public string IconPath { get; set; } = "";
     public int IconIndex { get; set; }
+    /// <summary>Catégorie du lanceur (« Jeux », « Apps », « Sites »), vide = rangée automatiquement.</summary>
+    public string Category { get; set; } = "";
+}
+
+public class LauncherCategory
+{
+    public string Name { get; set; } = "";
+    /// <summary>Icône (caractère de la police d'icônes Windows).</summary>
+    public string Glyph { get; set; } = "";
 }
 
 public class AppSettings
@@ -61,6 +75,9 @@ public class AppSettings
     public bool DefaultLauncherAdded { get; set; }
 
     public string MainHotkey { get; set; } = "Alt+Space";
+
+    /// <summary>Profil « bureau » : les apps s'ouvrent en fenêtre Windows normale (les sites restent en bulle).</summary>
+    public bool DesktopMode { get; set; }
     public bool PerBubbleHotkeys { get; set; }
     public string Side { get; set; } = "Right";
 
@@ -146,7 +163,12 @@ public class AppSettings
         try
         {
             if (File.Exists(FilePath))
-                return JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(FilePath)) ?? new AppSettings();
+            {
+                var settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(FilePath)) ?? new AppSettings();
+                // Les bulles provisoires ne durent que jusqu'au redémarrage de Bubulle.
+                settings.Bubbles.RemoveAll(b => b.Temporary);
+                return settings;
+            }
         }
         catch (Exception ex)
         {

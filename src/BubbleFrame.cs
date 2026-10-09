@@ -512,7 +512,33 @@ public sealed class BubbleFrame : Window
         if (_launcherView != null) { _launcherView.Refresh(); return; }
         _launcherView = new LauncherView(_c, Bubble);
         _host.Child = _launcherView;
+        UseSaoChrome();
     }
+
+    /// <summary>
+    /// Fenêtre façon SAO : pas de cadre ni d'en-tête Bubulle, seuls les panneaux sont dessinés
+    /// (le reste est transparent et laisse passer les clics).
+    /// </summary>
+    private void UseSaoChrome()
+    {
+        _header.Visibility = Visibility.Collapsed;
+        _headerRow.Height = new GridLength(0);
+        _host.Background = Brushes.Transparent;
+        _host.Margin = new Thickness(0);
+        _host.Clip = null;
+        _host.SizeChanged += (_, _) => _host.Clip = null;
+        if (Content is Border outer)
+        {
+            outer.Background = Brushes.Transparent;
+            outer.BorderThickness = new Thickness(0);
+        }
+        MinWidth = 0;
+        MinHeight = 0;
+        ResizeMode = ResizeMode.NoResize;
+        WindowChrome.GetWindowChrome(this).ResizeBorderThickness = new Thickness(0);
+    }
+
+    public bool IsLauncherMenu => _launcherView != null;
 
     public void RefreshLauncher() => _launcherView?.Refresh();
 
@@ -533,7 +559,8 @@ public sealed class BubbleFrame : Window
     public void InitMixer()
     {
         if (_host.Child is MixerView) return;
-        _host.Child = new MixerView();
+        _host.Child = new MixerView(() => _c.HideFrame(this));
+        UseSaoChrome();
     }
 
     // ---------- Contenu web ----------

@@ -291,7 +291,7 @@ public sealed class AppController : IDisposable
 
     public async void ToggleApp(BubbleConfig bubble) => await ToggleAppAsync(bubble, fromHotkey: false);
 
-    private async Task ToggleAppAsync(BubbleConfig bubble, bool fromHotkey)
+    private async Task ToggleAppAsync(BubbleConfig bubble, bool fromHotkey, bool forceBubble = false)
     {
         if (_busy || !Settings.Bubbles.Contains(bubble)) return;
         _search?.SafeClose();
@@ -306,6 +306,13 @@ public sealed class AppController : IDisposable
         if (_current?.Bubble == bubble)
         {
             HideCurrent(restoreFocus: true);
+            return;
+        }
+
+        // Mode bureau : l'app s'ouvre en fenêtre normale (sauf si elle est déjà dans sa bulle).
+        if (bubble.IsWindowApp && Settings.DesktopMode && !forceBubble && !IsInBubble(bubble))
+        {
+            OpenNormally(bubble);
             return;
         }
 
@@ -374,13 +381,26 @@ public sealed class AppController : IDisposable
         await frame.FadeInAsync();
     }
 
-    /// <summary>Lance l'app normalement (sa propre fenêtre, hors bulle), puis referme le lanceur.</summary>
+    /// <summary>
+    /// Mode Bubulle : l'app du lanceur s'ouvre dans une bulle provisoire. Mode bureau : elle est lancée
+    /// normalement (sa propre fenêtre), puis le lanceur se referme.
+    /// </summary>
     public void LaunchFromLauncher(BubbleConfig launcher, LauncherApp app)
     {
+        if (!Settings.DesktopMode && BubbleForLauncherApp(app) is { } bubble)
+        {
+            _ = ToggleAppAsync(bubble, fromHotkey: false, forceBubble: true);
+            return;
+        }
         try
         {
             var target = app.Kind == "Web" ? app.Url : app.LaunchPath;
             Process.Start(new ProcessStartInfo(target) { UseShellExecute = true });
+        }
+        catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
+        {
+            // Tu as répondu « Non » à la demande d'autorisation de Windows : rien à signaler.
+            return;
         }
         catch (Exception ex)
         {
@@ -397,6 +417,97 @@ public sealed class AppController : IDisposable
         CloseLauncher();
     }
 
+    /// <summary>La bulle de cette app (déjà dans la cascade, ou ajoutée provisoirement jusqu'au redémarrage).</summary>
+    private BubbleConfig? BubbleForLauncherApp(LauncherApp app)
+    {
+        bool web = app.Kind == "Web";
+        var existing = Settings.Bubbles.FirstOrDefault(b => web
+            ? b.IsWeb && b.Url.Equals(app.Url, StringComparison.OrdinalIgnoreCase)
+            : b.IsWindowApp && b.LaunchPath.Equals(app.LaunchPath, StringComparison.OrdinalIgnoreCase));
+        if (existing != null) return existing;
+
+        AppEntry? entry = null;
+        if (!web)
+        {
+            try { entry = AppCatalog.FromFile(app.LaunchPath); } catch (Exception ex) { App.Log(ex); }
+            // Raccourci de jeu (steam://…) : on ne sait pas quelle fenêtre attendre, il est lancé normalement.
+            if (string.IsNullOrEmpty(entry?.ProcessName)) return null;
+        }
+        var bubble = new BubbleConfig
+        {
+            Kind = web ? "Web" : "App",
+            Name = app.Name,
+            Url = app.Url,
+            LaunchPath = app.LaunchPath,
+            ProcessName = entry?.ProcessName ?? "",
+            TitleHint = entry?.TitleHint ?? "",
+            IconPath = app.IconPath,
+            IconIndex = app.IconIndex,
+            Temporary = true,
+        };
+        Settings.Bubbles.Add(bubble);
+        Settings.Save();
+        _launcher.Rebuild(replayOpen: false);
+        return bubble;
+    }
+
+    // ---------- Profils : mode Bubulle / mode bureau ----------
+
+    public void ToggleDesktopMode()
+    {
+        Settings.DesktopMode = !Settings.DesktopMode;
+        Settings.Save();
+        _launcher.UpdateModeLook();
+        Notify(Settings.DesktopMode
+            ? "Mode bureau : les apps s'ouvrent en fenêtre normale."
+            : "Mode Bubulle : les apps s'ouvrent dans leur bulle.");
+    }
+
+    /// <summary>L'app est dans sa bulle (affichée ou gardée cachée) ?</summary>
+    public bool IsInBubble(BubbleConfig bubble) => _frames.TryGetValue(bubble, out var frame) && frame.HasParkedNative;
+
+    /// <summary>Clic droit → « Ouvrir dans sa bulle », quel que soit le mode.</summary>
+    public void OpenInBubble(BubbleConfig bubble) => _ = ToggleAppAsync(bubble, fromHotkey: false, forceBubble: true);
+
+    /// <summary>Clic droit → « Sortir en fenêtre normale » : la fenêtre de l'app redevient une vraie fenêtre Windows.</summary>
+    public void ReleaseToWindow(BubbleConfig bubble)
+    {
+        if (!_frames.TryGetValue(bubble, out var frame)) return;
+        if (_current == frame)
+        {
+            _current = null;
+            _launcher.SetActive(null);
+        }
+        if (_floating.Remove(frame))
+        {
+            frame.SetClickThrough(false);
+            frame.ExitMini();
+        }
+        var hwnd = frame.DetachNative(minimize: false);
+        frame.Hide();
+        if (hwnd == IntPtr.Zero) return;
+        Native.ShowWindow(hwnd, Native.SW_RESTORE);
+        Native.SetForegroundWindow(hwnd);
+    }
+
+    /// <summary>Mode bureau : ramène la fenêtre de l'app au premier plan, ou lance l'app normalement.</summary>
+    private void OpenNormally(BubbleConfig bubble)
+    {
+        _lastHwnd.TryGetValue(bubble, out var preferred);
+        var hwnd = WindowFinder.Find(bubble.ProcessName, preferred, bubble.TitleHint);
+        _returnFocus = IntPtr.Zero;
+        HideCurrent(restoreFocus: false);
+        if (_launcher.IsOpen) _launcher.Close();
+        ClearActivity(bubble);
+        if (hwnd == IntPtr.Zero)
+        {
+            Launch(bubble);
+            return;
+        }
+        if (Native.IsIconic(hwnd)) Native.ShowWindow(hwnd, Native.SW_RESTORE);
+        Native.SetForegroundWindow(hwnd);
+    }
+
     public void AddLauncher()
     {
         int count = Settings.Bubbles.Count(b => b.IsLauncher);
@@ -408,7 +519,8 @@ public sealed class AppController : IDisposable
     }
 
     /// <summary>Ajoute une app (ou un site) dans un lanceur, avec la même recherche que la bulle « + ».</summary>
-    public void AddToLauncher(BubbleConfig launcher)
+    /// <param name="category">Catégorie ouverte dans le lanceur : l'app ajoutée y est rangée.</param>
+    public void AddToLauncher(BubbleConfig launcher, string? category = null)
     {
         _search?.SafeClose();
         const double width = 300;
@@ -452,6 +564,7 @@ public sealed class AppController : IDisposable
                 IconIndex = chosen.IconIndex,
             };
             if (chosen.IsWeb) entry.IconPath = await IconLoader.FetchFaviconAsync(chosen.Url);
+            if (category != null && LauncherView.CategoryOf(entry) != category) entry.Category = category;
             launcher.Apps.Add(entry);
             Settings.Save();
             if (_frames.TryGetValue(launcher, out var f)) f.RefreshLauncher();
@@ -577,9 +690,13 @@ public sealed class AppController : IDisposable
         double maxWidth = wa.Width - LauncherWindow.StripWidth - 2 * FrameGap;
         double width = Math.Min(b.Width > 0 ? b.Width : wa.Width * Settings.DefaultWidthPct / 100, maxWidth);
         double height = Math.Min(b.Height > 0 ? b.Height : wa.Height * Settings.DefaultHeightPct / 100, wa.Height - 2 * FrameGap);
+        // Lanceur façon SAO : taille fixe, les panneaux se placent dedans.
+        if (b.IsLauncher) (width, height) = (LauncherView.ViewWidth, Math.Min(LauncherView.ViewHeight, wa.Height - 2 * FrameGap));
+        else if (b.IsMixer) (width, height) = (MixerView.ViewWidth, Math.Min(MixerView.ViewHeight, wa.Height - 2 * FrameGap));
         frame.Width = width;
         frame.Height = height;
-        frame.Left = Settings.IsLeft ? stripRight - 8 : stripLeft + 8 - width;
+        // Un petit écart avec la bande : la flèche orange de la bulle active s'y glisse.
+        frame.Left = Settings.IsLeft ? stripRight - LauncherWindow.ArrowRoom : stripLeft + LauncherWindow.ArrowRoom - width;
         frame.Top = Math.Clamp(centerY - height / 2, wa.Top + FrameGap, wa.Bottom - height - FrameGap);
     }
 
@@ -640,7 +757,7 @@ public sealed class AppController : IDisposable
 
         // Mémorise la taille et l'opacité réglées pour cette bulle.
         var b = frame.Bubble;
-        if (frame.ActualWidth > 0)
+        if (frame.ActualWidth > 0 && !b.IsLauncher && !b.IsMixer)
         {
             b.Width = (int)Math.Round(frame.ActualWidth);
             b.Height = (int)Math.Round(frame.ActualHeight);

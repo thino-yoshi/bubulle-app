@@ -56,6 +56,9 @@ public sealed class LauncherWindow : Window
         Content = _canvas;
 
         _main = CreateMainBubble();
+        _modeSwitch = CreateModeSwitch();
+        _canvas.Children.Add(_modeSwitch);
+        Panel.SetZIndex(_modeSwitch, 11);
         _canvas.Children.Add(_main);
         Panel.SetZIndex(_main, 10);
         ReloadNotificationGif();
@@ -245,6 +248,19 @@ public sealed class LauncherWindow : Window
             v.MouseMove += (_, e) => OnHoldMove(v, e);
             v.MouseLeftButtonUp += (_, _) => EndHold(v, b);
             var menu = new ContextMenu();
+            if (b.IsWindowApp)
+            {
+                // Passage manuel d'un mode à l'autre, pour cette app seulement.
+                var mode = new MenuItem();
+                mode.Click += (_, _) =>
+                {
+                    if (_c.IsInBubble(b)) _c.ReleaseToWindow(b);
+                    else _c.OpenInBubble(b);
+                };
+                menu.Opened += (_, _) => mode.Header = _c.IsInBubble(b) ? "Sortir en fenêtre normale" : "Ouvrir dans sa bulle";
+                menu.Items.Add(mode);
+                menu.Items.Add(new Separator());
+            }
             var customize = new MenuItem { Header = "Personnaliser… (nom et logo)" };
             customize.Click += (_, _) => _c.CustomizeBubble(b);
             menu.Items.Add(customize);
@@ -292,6 +308,8 @@ public sealed class LauncherWindow : Window
         // Cascade déployée : les messages sont vus, l'animation s'arrête.
         _notifyPending = false;
         UpdateNotifyAnimation();
+        UpdateActiveArrow();
+        ShowModeSwitch(true);
         Native.SetWindowPos(new WindowInteropHelper(this).Handle, Native.HWND_TOPMOST, 0, 0, 0, 0,
             Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
         int i = 0;
@@ -308,6 +326,8 @@ public sealed class LauncherWindow : Window
         if (IsOpen && animated) _c.Sounds.PlayClose();
         IsOpen = false;
         UpdateMainProgress();
+        UpdateActiveArrow();
+        ShowModeSwitch(false);
         foreach (var el in AllItems())
         {
             if (!animated)
@@ -478,6 +498,43 @@ public sealed class LauncherWindow : Window
     {
         var list = _c.Settings.Bubbles;
         for (int i = 0; i < _apps.Count; i++) _apps[i].SetActive(bubble != null && i < list.Count && list[i] == bubble);
+        int index = bubble == null ? -1 : list.IndexOf(bubble);
+        _arrowY = index >= 0 && index < _apps.Count ? TargetCenter(index)
+            : bubble != null && _settings is { Visibility: Visibility.Visible } ? SettingsCenter : null;
+        UpdateActiveArrow();
+    }
+
+    // ---------- Flèche de la bulle active (façon SAO) ----------
+
+    /// <summary>Écart laissé entre la bande et la bulle-fenêtre : la pointe de la flèche touche la fenêtre.</summary>
+    public const double ArrowRoom = 1;
+    private const double ArrowLength = 13, ArrowHalf = 10;
+    public static readonly Brush ActiveBrush = Frozen(new SolidColorBrush(Color.FromRgb(0xF0, 0xA8, 0x18)));
+    private Polygon? _activeArrow;
+    private double? _arrowY;
+
+    private void UpdateActiveArrow()
+    {
+        bool show = _arrowY != null && (IsOpen || _settings is { Visibility: Visibility.Visible });
+        if (!show)
+        {
+            if (_activeArrow != null) _activeArrow.Visibility = Visibility.Collapsed;
+            return;
+        }
+        if (_activeArrow == null)
+        {
+            _activeArrow = new Polygon { Fill = ActiveBrush, IsHitTestVisible = false };
+            _canvas.Children.Add(_activeArrow);
+            Panel.SetZIndex(_activeArrow, 5);
+        }
+        double y = _arrowY!.Value;
+        // Bulles à droite : la fenêtre est à gauche, la flèche pointe vers la gauche (et inversement).
+        _activeArrow.Points = _c.Settings.IsLeft
+            ? new PointCollection { new(StripWidth - ArrowLength, y - ArrowHalf), new(StripWidth, y), new(StripWidth - ArrowLength, y + ArrowHalf) }
+            : new PointCollection { new(ArrowLength, y - ArrowHalf), new(0, y), new(ArrowLength, y + ArrowHalf) };
+        bool wasHidden = _activeArrow.Visibility != Visibility.Visible;
+        _activeArrow.Visibility = Visibility.Visible;
+        if (wasHidden) _activeArrow.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(180)) { BeginTime = TimeSpan.FromMilliseconds(120) });
     }
 
     public void SetLoading(BubbleConfig bubble, bool loading)
@@ -540,10 +597,107 @@ public sealed class LauncherWindow : Window
         },
     }));
 
+    // ---------- Profils : logo de la bulle principale et petite bulle de changement de mode ----------
+
+    private static readonly Brush LogoOrange = Frozen(new SolidColorBrush(Color.FromRgb(0xF7, 0xB5, 0x00)));
+    private static readonly Brush LogoOrangeFill = Frozen(new LinearGradientBrush(Color.FromRgb(0xF7, 0xB5, 0x00), Color.FromRgb(0xE3, 0x95, 0x02), 90));
+    private static readonly Brush LogoWhite = Frozen(new SolidColorBrush(Color.FromRgb(0xF7, 0xF7, 0xF7)));
+    private static readonly Geometry OnePerson = Frozen(Geometry.Parse(
+        "M588,411 L657,411 722,476 722,540 717,545 717,612 674,655 674,693 855,738 878,840 " +
+        "368,840 386,742 570,693 570,657 527,614 527,560 521,555 521,476 Z"));
+    private static readonly Geometry TwoPeople = Frozen(Geometry.Parse(
+        "M460,448 L528,448 584,510 578,626 532,668 531,690 457,710 430,838 252,838 276,749 443,703 442,673 399,628 393,510 Z " +
+        "M689,414 L771,414 830,478 820,611 772,656 772,695 958,743 978,838 462,838 484,743 672,695 672,660 625,612 619,476 Z"));
+
+    /// <summary>Logo rond : blanc cerclé de noir (mode Bubulle) ou orange cerclé de blanc (mode bureau).</summary>
+    private static DrawingImage Logo(Geometry people, bool orange)
+    {
+        var center = new Point(620, 620);
+        var group = new DrawingGroup();
+        if (orange)
+        {
+            group.Children.Add(new GeometryDrawing(LogoOrange, null, new EllipseGeometry(center, 610, 610)));
+            group.Children.Add(new GeometryDrawing(Brushes.White, null, new EllipseGeometry(center, 576, 576)));
+            group.Children.Add(new GeometryDrawing(LogoOrangeFill, null, new EllipseGeometry(center, 516, 516)));
+            group.Children.Add(new GeometryDrawing(Brushes.White, null, people));
+        }
+        else
+        {
+            group.Children.Add(new GeometryDrawing(Brushes.Black, null, new EllipseGeometry(center, 597, 597)));
+            group.Children.Add(new GeometryDrawing(LogoWhite, null, new EllipseGeometry(center, 520, 520)));
+            group.Children.Add(new GeometryDrawing(Brushes.Black, null, people));
+        }
+        return Frozen(new DrawingImage(group));
+    }
+
+    private static readonly DrawingImage DesktopLogo = Logo(OnePerson, orange: true);
+    private static readonly DrawingImage SwitchToDesktop = Logo(TwoPeople, orange: true);
+    private static readonly DrawingImage SwitchToBubble = Logo(TwoPeople, orange: false);
+    private const double SwitchSize = MainSize / 2;
+
+    private Image? _mainLogo;
+    private readonly Grid _modeSwitch;
+    private Image? _switchLogo;
+
+    /// <summary>Petite bulle (moitié de la bulle principale), en diagonale : un clic change de mode.</summary>
+    private Grid CreateModeSwitch()
+    {
+        _switchLogo = new Image { Stretch = Stretch.Uniform };
+        var g = new Grid
+        {
+            Width = SwitchSize, Height = SwitchSize, Cursor = Cursors.Hand, Visibility = Visibility.Hidden, Opacity = 0,
+            RenderTransformOrigin = new Point(0.5, 0.5), RenderTransform = new ScaleTransform(1, 1),
+        };
+        g.Children.Add(_switchLogo);
+        g.MouseEnter += (_, _) => BubbleVisual.Scale(g, 1.15);
+        g.MouseLeave += (_, _) => BubbleVisual.Scale(g, 1);
+        g.MouseLeftButtonUp += (_, e) => { e.Handled = true; _c.ToggleDesktopMode(); };
+        UpdateModeLook(g);
+        return g;
+    }
+
+    public void UpdateModeLook() => UpdateModeLook(_modeSwitch);
+
+    private void UpdateModeLook(Grid modeSwitch)
+    {
+        bool desktop = _c.Settings.DesktopMode;
+        if (_mainLogo != null) _mainLogo.Source = desktop ? DesktopLogo : MainLogo;
+        if (_switchLogo != null) _switchLogo.Source = desktop ? SwitchToBubble : SwitchToDesktop;
+        modeSwitch.ToolTip = desktop ? "Passer en mode Bubulle (les apps s'ouvrent en bulle)" : "Passer en mode bureau (les apps s'ouvrent en fenêtre normale)";
+    }
+
+    /// <summary>
+    /// La petite bulle se place en diagonale de la bulle principale, côté intérieur de l'écran,
+    /// à l'opposé de la cascade (au-dessus quand la cascade descend).
+    /// </summary>
+    private void ShowModeSwitch(bool show)
+    {
+        if (show)
+        {
+            double cx = _c.Settings.IsLeft ? StripWidth - SwitchSize / 2 : SwitchSize / 2;
+            double cy = _mainY + (ExpandsDown ? -1 : 1) * 35;
+            Canvas.SetLeft(_modeSwitch, cx - SwitchSize / 2);
+            Canvas.SetTop(_modeSwitch, cy - SwitchSize / 2);
+            _modeSwitch.Visibility = Visibility.Visible;
+            _modeSwitch.BeginAnimation(OpacityProperty, new DoubleAnimation(1, TimeSpan.FromMilliseconds(200)) { BeginTime = TimeSpan.FromMilliseconds(80) });
+            var pop = new DoubleAnimation(0.4, 1, TimeSpan.FromMilliseconds(260)) { BeginTime = TimeSpan.FromMilliseconds(80), EasingFunction = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.5 } };
+            var scale = (ScaleTransform)_modeSwitch.RenderTransform;
+            scale.BeginAnimation(ScaleTransform.ScaleXProperty, pop);
+            scale.BeginAnimation(ScaleTransform.ScaleYProperty, pop);
+        }
+        else
+        {
+            var fade = new DoubleAnimation(0, TimeSpan.FromMilliseconds(130));
+            fade.Completed += (_, _) => { if (!IsOpen) _modeSwitch.Visibility = Visibility.Hidden; };
+            _modeSwitch.BeginAnimation(OpacityProperty, fade);
+        }
+    }
+
     private Grid CreateMainBubble()
     {
         var g = new Grid { Width = MainSize, Height = MainSize, Cursor = Cursors.Hand, ToolTip = "Bubulle" };
-        g.Children.Add(new Image { Source = MainLogo, Stretch = Stretch.Uniform });
+        _mainLogo = new Image { Source = _c.Settings.DesktopMode ? DesktopLogo : MainLogo, Stretch = Stretch.Uniform };
+        g.Children.Add(_mainLogo);
         _notifyImage = new Image
         {
             Stretch = Stretch.Uniform, IsHitTestVisible = false, Visibility = Visibility.Collapsed,
@@ -630,8 +784,10 @@ public sealed class LauncherWindow : Window
 
     private sealed class BubbleVisual : Grid
     {
-        private readonly Ellipse _ring;
+        private readonly Ellipse _ring, _fill;
         private readonly FrameworkElement? _content;
+        private Brush? _glyphBrush;
+        private Ellipse? _activeOutline;
 
         public BubbleVisual(double size, ImageSource? icon, string? glyph)
         {
@@ -641,7 +797,8 @@ public sealed class LauncherWindow : Window
             RenderTransformOrigin = new Point(0.5, 0.5);
             RenderTransform = new ScaleTransform(1, 1);
 
-            Children.Add(new Ellipse { Fill = BubbleFill });
+            _fill = new Ellipse { Fill = BubbleFill };
+            Children.Add(_fill);
             if (icon != null)
             {
                 _content = new Image { Source = icon, Width = size * 0.58, Height = size * 0.58 };
@@ -721,10 +878,27 @@ public sealed class LauncherWindow : Window
             StopHoldRing();
         }
 
+        /// <summary>Bulle ouverte, façon SAO : remplie d'orange, cerclée de blanc puis d'orange.</summary>
         public void SetActive(bool active)
         {
-            _ring.Stroke = active ? AccentBrush : RingBrush;
+            _fill.Fill = active ? ActiveBrush : BubbleFill;
+            _ring.Stroke = active ? Brushes.White : RingBrush;
             _ring.StrokeThickness = active ? 3 : 1.2;
+            if (_content is TextBlock text)
+            {
+                _glyphBrush ??= text.Foreground;
+                text.Foreground = active ? Brushes.White : _glyphBrush;
+            }
+            if (active && _activeOutline == null)
+            {
+                _activeOutline = new Ellipse { Stroke = ActiveBrush, StrokeThickness = 2, Margin = new Thickness(-2.5), IsHitTestVisible = false };
+                Children.Add(_activeOutline);
+            }
+            else if (!active && _activeOutline != null)
+            {
+                Children.Remove(_activeOutline);
+                _activeOutline = null;
+            }
         }
 
         public void SetLoading(bool loading)
