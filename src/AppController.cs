@@ -99,11 +99,170 @@ public sealed class AppController : IDisposable
         HwndSource.FromHwnd(launcherHwnd)!.AddHook(ShellHook);
         if (Settings.PreloadWeb) _ = PreloadWebBubbles();
         if (Settings.HideTaskbar) ApplyTaskbar();
+        _linkTimer.Tick += (_, _) => ScanLinkedWindows();
+        _linkTimer.Start();
         _ = CheckForUpdate(TimeSpan.FromSeconds(20), quiet: true);
         // Bubulle reste souvent ouvert des jours : on revérifie toutes les 3 heures.
         _updateTimer.Tick += async (_, _) => { if (Updater.Ready == null) await CheckForUpdate(TimeSpan.Zero, quiet: true); };
         _updateTimer.Start();
     }
+
+    // ---------- Fenêtres liées (mini-bulles) ----------
+
+    private sealed class LinkedWindow
+    {
+        public required IntPtr Hwnd;
+        public required BubbleConfig Config;
+        public required BubbleFrame Frame;
+        public bool Unfolded = true;
+    }
+
+    private readonly Dictionary<BubbleConfig, List<LinkedWindow>> _linkedWindows = new();
+    private readonly Dictionary<BubbleConfig, HashSet<IntPtr>> _knownWindows = new();
+    private readonly System.Windows.Threading.DispatcherTimer _linkTimer = new() { Interval = TimeSpan.FromMilliseconds(800) };
+
+    /// <summary>
+    /// Une app dans sa bulle ouvre une autre fenêtre (stream détaché de Discord, lecteur miniature…) :
+    /// elle part dans sa propre petite bulle-fenêtre détachée, avec une mini-bulle juste sous la bulle mère.
+    /// </summary>
+    private void ScanLinkedWindows()
+    {
+        bool changed = false;
+        foreach (var (bubble, frame) in _frames.ToList())
+        {
+            if (frame.IsLinkedWindow || !bubble.IsWindowApp) continue;
+            var native = frame.NativeHwnd;
+            if (native == IntPtr.Zero || !Native.IsWindow(native))
+            {
+                _knownWindows.Remove(bubble);
+                continue;
+            }
+            uint pid = Native.ProcessId(native);
+            var windows = WindowFinder.VisibleTopLevelWindows(pid);
+            if (!_knownWindows.TryGetValue(bubble, out var known))
+            {
+                // Première fois : les fenêtres déjà ouvertes de l'app ne sont pas « nouvelles ».
+                _knownWindows[bubble] = new HashSet<IntPtr>(windows);
+                continue;
+            }
+            foreach (var h in windows)
+            {
+                if (!known.Add(h) || h == native || _frames.Values.Any(f => f.NativeHwnd == h)) continue;
+                if (!IsLinkedCandidate(h, native)) continue;
+                AddLinked(bubble, h);
+                changed = true;
+            }
+        }
+        // Fenêtres liées fermées par l'app : leur mini-bulle disparaît.
+        foreach (var (parent, list) in _linkedWindows.ToList())
+        {
+            foreach (var lw in list.Where(l => !Native.IsWindow(l.Hwnd)).ToList())
+            {
+                list.Remove(lw);
+                _floating.Remove(lw.Frame);
+                _frames.Remove(lw.Config);
+                lw.Frame.DisposeContent();
+                lw.Frame.Close();
+                changed = true;
+            }
+            if (list.Count == 0) _linkedWindows.Remove(parent);
+        }
+        if (changed) PushLinked();
+    }
+
+    /// <summary>Vraie fenêtre de contenu (pas un menu, une bulle d'aide ni une boîte de dialogue).</summary>
+    private static bool IsLinkedCandidate(IntPtr h, IntPtr parentNative)
+    {
+        if (Native.ClassName(h) == "#32770") return false;
+        if (!Native.GetWindowRect(h, out var r) || r.Width < 200 || r.Height < 110) return false;
+        var owner = Native.GetWindow(h, Native.GW_OWNER);
+        if (owner != IntPtr.Zero && owner != parentNative) return false;
+        long ex = Native.GetExStyle(h);
+        bool tool = (ex & Native.WS_EX_TOOLWINDOW) != 0, topmost = (ex & 0x8L) != 0;
+        // Les lecteurs miniatures sont souvent des fenêtres « outil » toujours au premier plan.
+        if (tool && !topmost) return false;
+        // Un vrai titre est exigé : les menus et listes déroulantes (ex. menu « ⋮ » de Chrome) n'en ont pas.
+        return Native.GetWindowTextLength(h) > 0;
+    }
+
+    private async void AddLinked(BubbleConfig parent, IntPtr hwnd)
+    {
+        var list = _linkedWindows.TryGetValue(parent, out var l) ? l : _linkedWindows[parent] = new List<LinkedWindow>();
+        var title = Native.WindowTitle(hwnd);
+        var config = new BubbleConfig
+        {
+            Kind = "App",
+            Name = string.IsNullOrWhiteSpace(title) ? parent.Name : title,
+            ProcessName = parent.ProcessName,
+            LaunchPath = parent.LaunchPath,
+            IconPath = parent.IconPath,
+            IconIndex = parent.IconIndex,
+            Volume = parent.Volume,
+        };
+        var frame = new BubbleFrame(this, config, Settings.DefaultOpacity);
+        frame.MarkLinked();
+        _frames[config] = frame;
+        _floating.Add(frame);
+        list.Add(new LinkedWindow { Hwnd = hwnd, Config = config, Frame = frame });
+        PushLinked();
+
+        frame.PrepareShow();
+        frame.EnterMini(LinkedRect(parent, list.Count - 1));
+        frame.Show();
+        bool repaint = frame.AttachNative(hwnd);
+        await Task.Delay(repaint ? 320 : 120);
+        await frame.FadeInAsync();
+    }
+
+    /// <summary>Petite bulle-fenêtre juste à côté de sa mini-bulle.</summary>
+    private Rect LinkedRect(BubbleConfig parent, int slot)
+    {
+        var wa = Screens.WorkAreaDip(Settings);
+        const double w = 420, h = 260;
+        var (centerY, stripLeft, stripRight) = _launcher.LinkedAnchorDip(parent, slot);
+        double left = Settings.IsLeft ? stripRight + 6 : stripLeft - 6 - w;
+        double top = Math.Clamp(centerY - h / 2, wa.Top + FrameGap, wa.Bottom - h - FrameGap);
+        return new Rect(left, top, w, h);
+    }
+
+    /// <summary>Clic sur une mini-bulle (ou croix de sa fenêtre) : on plie / déplie sa fenêtre, indépendamment de la bulle mère.</summary>
+    public async void ToggleLinked(BubbleConfig config)
+    {
+        var lw = _linkedWindows.Values.SelectMany(l => l).FirstOrDefault(l => l.Config == config);
+        if (lw == null) return;
+        if (lw.Unfolded)
+        {
+            lw.Unfolded = false;
+            PushLinked();
+            await lw.Frame.ParkAnimatedAsync();
+            return;
+        }
+        lw.Unfolded = true;
+        PushLinked();
+        await lw.Frame.HideTask;
+        lw.Frame.PrepareShow();
+        lw.Frame.Show();
+        bool repaint = lw.Frame.Unpark();
+        await Task.Delay(repaint ? 320 : 110);
+        await lw.Frame.FadeInAsync();
+    }
+
+    private async void CloseLinked(LinkedWindow lw)
+    {
+        await lw.Frame.HideAnimatedAsync();
+        if (Native.IsWindow(lw.Hwnd)) Native.PostMessage(lw.Hwnd, Native.WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+        await Task.Delay(400);
+        // La mini-bulle disparaît (si l'app a refusé de fermer sa fenêtre, celle-ci redevient une fenêtre normale).
+        foreach (var list in _linkedWindows.Values) list.Remove(lw);
+        foreach (var key in _linkedWindows.Where(kv => kv.Value.Count == 0).Select(kv => kv.Key).ToList()) _linkedWindows.Remove(key);
+        _floating.Remove(lw.Frame);
+        _frames.Remove(lw.Config);
+        lw.Frame.Close();
+        PushLinked();
+    }
+
+    private void PushLinked() => _launcher.SetLinked(_linkedWindows.ToDictionary(
+        kv => kv.Key, kv => kv.Value.Select(l => (l.Config, l.Unfolded)).ToList()));
 
     // ---------- Barre des tâches ----------
 
@@ -811,6 +970,14 @@ public sealed class AppController : IDisposable
 
     public void HideFrame(BubbleFrame frame)
     {
+        // Croix d'une fenêtre liée : on ferme vraiment la fenêtre détachée, l'app la reprend dans sa fenêtre
+        // principale (stream Discord, lecteur miniature…). Pour seulement la plier : clic sur sa mini-bulle.
+        if (frame.IsLinkedWindow)
+        {
+            var linked = _linkedWindows.Values.SelectMany(l => l).FirstOrDefault(l => l.Frame == frame);
+            if (linked != null) CloseLinked(linked);
+            return;
+        }
         frame.ExitWebFullscreen();
         if (_floating.Remove(frame))
         {
@@ -1371,6 +1538,7 @@ public sealed class AppController : IDisposable
         if (_disposed) return;
         _disposed = true;
         Taskbar.Dispose();
+        _linkTimer.Stop();
         // Rend toujours les fenêtres empruntées dans leur état d'origine.
         HideCurrent(restoreFocus: false, animate: false);
         foreach (var frame in _frames.Values) frame.DisposeContent();

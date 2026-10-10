@@ -60,6 +60,20 @@ public static class WindowFinder
         return paths;
     }
 
+    /// <summary>Fenêtres de premier niveau visibles (et non masquées par Windows) d'un processus.</summary>
+    public static List<IntPtr> VisibleTopLevelWindows(uint pid)
+    {
+        var list = new List<IntPtr>();
+        Native.EnumWindows((h, _) =>
+        {
+            if (Native.ProcessId(h) != pid || !Native.IsWindowVisible(h)) return true;
+            if (Native.DwmGetWindowAttribute(h, Native.DWMWA_CLOAKED, out int cloaked, sizeof(int)) == 0 && cloaked != 0) return true;
+            list.Add(h);
+            return true;
+        }, IntPtr.Zero);
+        return list;
+    }
+
     /// <summary>Le processus de la fenêtre correspond-il à l'app ? (Steam : bulles anciennes réglées sur « steam ».)</summary>
     private static bool SameApp(string windowExe, string processName) =>
         windowExe.Equals(processName, StringComparison.OrdinalIgnoreCase) ||

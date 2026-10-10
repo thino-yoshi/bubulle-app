@@ -131,6 +131,9 @@ internal static class Native
         SetLayeredWindowAttributes(h, 0, (byte)(Math.Clamp(percent, 10, 100) * 255 / 100), LWA_ALPHA);
     }
 
+    [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
+    public const uint WM_CLOSE = 0x0010;
+
     public static string ClassName(IntPtr h)
     {
         var sb = new StringBuilder(256);

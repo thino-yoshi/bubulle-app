@@ -92,7 +92,66 @@ public sealed class LauncherWindow : Window
 
     private bool ExpandsDown => _mainY < Height / 2;
 
-    private double TargetCenter(int index) => _mainY + (ExpandsDown ? 1 : -1) * (FirstOffset + index * Spacing);
+    /// <summary>Centre de la bulle n° index ; les mini-bulles des bulles au-dessus la décalent.</summary>
+    private double TargetCenter(int index) => _mainY + (ExpandsDown ? 1 : -1) * (FirstOffset + index * Spacing + MinisBefore(index) * MiniStep);
+
+    // ---------- Mini-bulles (fenêtres liées : stream détaché, lecteur miniature…) ----------
+
+    private const double MiniSize = 26, MiniFirst = 38, MiniStep = 30;
+    private Dictionary<BubbleConfig, List<(BubbleConfig Child, bool Unfolded)>> _linked = new();
+    private readonly List<BubbleVisual> _minis = new();
+    private readonly Dictionary<BubbleVisual, (int Parent, int Slot)> _miniInfo = new();
+
+    private int MinisOf(int index) =>
+        index < _c.Settings.Bubbles.Count && _linked.TryGetValue(_c.Settings.Bubbles[index], out var list) ? list.Count : 0;
+
+    private int MinisBefore(int index)
+    {
+        int n = 0;
+        for (int j = 0; j < index && j < _c.Settings.Bubbles.Count; j++) n += MinisOf(j);
+        return n;
+    }
+
+    private double MiniCenter(int parent, int slot) => TargetCenter(parent) + (ExpandsDown ? 1 : -1) * (MiniFirst + slot * MiniStep);
+
+    private double CenterOf(BubbleVisual el, int index) =>
+        _miniInfo.TryGetValue(el, out var info) ? MiniCenter(info.Parent, info.Slot) : TargetCenter(index);
+
+    /// <summary>Position d'une mini-bulle (pour placer sa petite bulle-fenêtre juste à côté).</summary>
+    public (double CenterY, double StripLeft, double StripRight) LinkedAnchorDip(BubbleConfig parent, int slot)
+    {
+        int i = Math.Max(0, _c.Settings.Bubbles.IndexOf(parent));
+        return (Top + MiniCenter(i, slot), Left, Left + StripWidth);
+    }
+
+    /// <summary>Les fenêtres liées changent : les mini-bulles sont refaites et la cascade se réorganise.</summary>
+    public void SetLinked(Dictionary<BubbleConfig, List<(BubbleConfig Child, bool Unfolded)>> linked)
+    {
+        _linked = linked;
+        Rebuild(replayOpen: false);
+    }
+
+    private void BuildMinis()
+    {
+        _minis.Clear();
+        _miniInfo.Clear();
+        var bubbles = _c.Settings.Bubbles;
+        for (int i = 0; i < bubbles.Count; i++)
+        {
+            if (!_linked.TryGetValue(bubbles[i], out var list)) continue;
+            var icon = BubbleFrame.IconFor(bubbles[i]);
+            for (int k = 0; k < list.Count; k++)
+            {
+                var (child, unfolded) = list[k];
+                var v = new BubbleVisual(MiniSize, icon, icon == null ? "\uE8A7" : null) { ToolTip = child.Name };
+                v.SetLinkedLook(unfolded);
+                var target = child;
+                v.MouseLeftButtonUp += (_, e) => { e.Handled = true; _c.ToggleLinked(target); };
+                _minis.Add(v);
+                _miniInfo[v] = (i, k);
+            }
+        }
+    }
 
     public void UpdatePlacement()
     {
@@ -283,7 +342,7 @@ public sealed class LauncherWindow : Window
             el.BeginAnimation(OpacityProperty, null);
             el.Visibility = Visibility.Visible;
             el.Opacity = 1;
-            PlaceCenter(el, TargetCenter(i++));
+            PlaceCenter(el, CenterOf(el, i++));
         }
     }
 
@@ -350,6 +409,7 @@ public sealed class LauncherWindow : Window
             if (_progress.TryGetValue(b, out var p)) v.SetProgress(p);
         }
         _plus = new BubbleVisual(PlusSize, null, "+") { ToolTip = "Ajouter une application" };
+        BuildMinis();
         _plus.MouseLeftButtonUp += (_, _) => _c.ToggleSearch();
 
         foreach (var el in AllItems())
@@ -365,6 +425,7 @@ public sealed class LauncherWindow : Window
     {
         foreach (var a in _apps) yield return a;
         if (_plus != null) yield return _plus;
+        foreach (var m in _minis) yield return m;
     }
 
     public void Open()
@@ -383,7 +444,7 @@ public sealed class LauncherWindow : Window
         foreach (var el in AllItems())
         {
             el.Visibility = Visibility.Visible;
-            Animate(el, TargetCenter(i), 1, i * 35, new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.45 });
+            Animate(el, CenterOf(el, i), 1, i * 35, new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.45 });
             i++;
         }
     }
@@ -983,6 +1044,14 @@ public sealed class LauncherWindow : Window
             _ring.Stroke = dragging ? HoldBrush : RingBrush;
             _ring.StrokeThickness = dragging ? 2.5 : 1.2;
             StopHoldRing();
+        }
+
+        /// <summary>Mini-bulle d'une fenêtre liée : contour orange, remplie d'orange quand sa fenêtre est dépliée.</summary>
+        public void SetLinkedLook(bool unfolded)
+        {
+            _ring.Stroke = ActiveBrush;
+            _ring.StrokeThickness = 1.6;
+            _fill.Fill = unfolded ? ActiveBrush : BubbleFill;
         }
 
         /// <summary>Bulle des paramètres : blanche cerclée de noir, engrenage noir (comme le logo de la bulle principale).</summary>

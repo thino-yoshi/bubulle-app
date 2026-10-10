@@ -371,6 +371,7 @@ public sealed class BubbleFrame : Window
         var bar = new DockPanel { LastChildFill = true, Margin = new Thickness(8, 0, 4, 0) };
         var close = new Button { Content = Glyph(""), ToolTip = "Fermer" };
         var restore = new Button { Content = Glyph(""), ToolTip = "Agrandir à côté de sa bulle" };
+        _miniRestore = restore;
         var through = new Button { Content = Glyph(""), ToolTip = "Traversable" };
         foreach (var b in new[] { close, restore, through })
         {
@@ -454,6 +455,17 @@ public sealed class BubbleFrame : Window
         popup.Closed += (_, _) => button.IsChecked = false;
         button.MouseWheel += (_, e) => _opacity.Value = Math.Clamp(_opacity.Value + (e.Delta > 0 ? 5 : -5), 30, 100);
         return button;
+    }
+
+    private Button? _miniRestore;
+
+    /// <summary>Fenêtre liée (mini-bulle) : elle reste une petite bulle détachée, sans « agrandir à côté de sa bulle ».</summary>
+    public bool IsLinkedWindow { get; private set; }
+
+    public void MarkLinked()
+    {
+        IsLinkedWindow = true;
+        if (_miniRestore != null) _miniRestore.Visibility = Visibility.Collapsed;
     }
 
     public void EnterMini(Rect rect)
