@@ -90,6 +90,10 @@ public static class AppCatalog
             }
         }
 
+        // « Toutes les applications » de Windows : apps du Store, Xbox… et tout ce qui n'a pas de raccourci.
+        foreach (var app in StoreApps.List())
+            if (!byName.ContainsKey(app.Name) && !IsJunk(app.Name)) byName[app.Name] = app;
+
         if (!byName.Values.Any(a => a.ProcessName.Equals("explorer", StringComparison.OrdinalIgnoreCase)))
         {
             var explorer = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe");
@@ -109,13 +113,24 @@ public static class AppCatalog
     public static AppEntry? FromFile(string path) =>
         path.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase) ? FromShortcut(path) : FromExe(path);
 
-    public static AppEntry FromExe(string exePath) => new()
+    public static AppEntry FromExe(string exePath)
     {
-        Name = FriendlyName(exePath),
-        LaunchPath = exePath,
-        ProcessName = Path.GetFileNameWithoutExtension(exePath),
-        IconPath = exePath,
-    };
+        // La fenêtre de Steam appartient à « steamwebhelper » : on présente la vraie app (Steam, steam.exe).
+        if (Path.GetFileNameWithoutExtension(exePath).Equals("steamwebhelper", StringComparison.OrdinalIgnoreCase))
+        {
+            var steamDir = Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(exePath))));
+            var steamExe = steamDir != null ? Path.Combine(steamDir, "steam.exe") : exePath;
+            if (File.Exists(steamExe))
+                return new AppEntry { Name = "Steam", LaunchPath = steamExe, ProcessName = "steamwebhelper", IconPath = steamExe };
+        }
+        return new AppEntry
+        {
+            Name = FriendlyName(exePath),
+            LaunchPath = exePath,
+            ProcessName = Path.GetFileNameWithoutExtension(exePath),
+            IconPath = exePath,
+        };
+    }
 
     /// <summary>Nom affiché d'un programme : sa description (« Google Chrome ») plutôt que « chrome.exe ».</summary>
     public static string FriendlyName(string exePath)
@@ -201,6 +216,8 @@ public static class AppCatalog
         // lance chrome_proxy.exe, mais la fenêtre appartient au navigateur lui-même.
         var exe = Path.GetFileNameWithoutExtension(file);
         if (IsWebAppShortcut(target, args)) return exe.Replace("_proxy", "", StringComparison.OrdinalIgnoreCase);
+        // Steam : sa fenêtre appartient à « steamwebhelper », pas à steam.exe.
+        if (exe.Equals("steam", StringComparison.OrdinalIgnoreCase)) return "steamwebhelper";
         return exe;
     }
 
@@ -296,6 +313,13 @@ public static class IconLoader
         ImageSource? image = null;
         try
         {
+            // App du Store : son icône vient du Shell.
+            if (iconPath.StartsWith(StoreApps.Prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                image = StoreApps.Icon(iconPath);
+                Cache[key] = image;
+                return image;
+            }
             if (!string.IsNullOrEmpty(iconPath) && File.Exists(iconPath))
             {
                 if (iconPath.EndsWith(".png", StringComparison.OrdinalIgnoreCase))

@@ -60,6 +60,11 @@ public static class WindowFinder
         return paths;
     }
 
+    /// <summary>Le processus de la fenêtre correspond-il à l'app ? (Steam : bulles anciennes réglées sur « steam ».)</summary>
+    private static bool SameApp(string windowExe, string processName) =>
+        windowExe.Equals(processName, StringComparison.OrdinalIgnoreCase) ||
+        (processName.Equals("steam", StringComparison.OrdinalIgnoreCase) && windowExe.Equals("steamwebhelper", StringComparison.OrdinalIgnoreCase));
+
     /// <summary>Fenêtre principale « normale » d'une app : visible, avec un titre, pas un outil ni un popup.</summary>
     private static bool IsAppWindow(IntPtr h)
     {
@@ -77,7 +82,7 @@ public static class WindowFinder
         var cls = Native.ClassName(h);
 
         var path = Native.ProcessPath(h);
-        if (path == null || !Path.GetFileNameWithoutExtension(path).Equals(processName, StringComparison.OrdinalIgnoreCase)) return false;
+        if (path == null || !SameApp(Path.GetFileNameWithoutExtension(path), processName)) return false;
 
         // explorer.exe possède aussi le bureau et la barre des tâches : seules les vraies fenêtres de dossier comptent.
         if (processName.Equals("explorer", StringComparison.OrdinalIgnoreCase) && cls != "CabinetWClass") return false;

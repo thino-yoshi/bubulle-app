@@ -343,7 +343,9 @@ public sealed class AppController : IDisposable
         }
 
         // Mode bureau : l'app s'ouvre en fenêtre normale (sauf si elle est déjà dans sa bulle).
-        if (bubble.IsWindowApp && Settings.DesktopMode && !forceBubble && !IsInBubble(bubble) && !IsSaoExplorer(bubble))
+        // App du Store qu'on ne peut pas mettre en bulle (pas de programme connu) : toujours ouverte normalement.
+        bool launchOnly = bubble.IsWindowApp && string.IsNullOrEmpty(bubble.ProcessName);
+        if (launchOnly || (bubble.IsWindowApp && Settings.DesktopMode && !forceBubble && !IsInBubble(bubble) && !IsSaoExplorer(bubble)))
         {
             OpenNormally(bubble);
             return;
@@ -429,7 +431,7 @@ public sealed class AppController : IDisposable
         try
         {
             var target = app.Kind == "Web" ? app.Url : app.LaunchPath;
-            Process.Start(new ProcessStartInfo(target) { UseShellExecute = true });
+            StoreApps.Start(target);
         }
         catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
         {
@@ -486,6 +488,12 @@ public sealed class AppController : IDisposable
     }
 
     // ---------- Profils : mode Bubulle / mode bureau ----------
+
+    public void OpenInBrowser(BubbleConfig bubble)
+    {
+        try { Process.Start(new ProcessStartInfo(bubble.Url) { UseShellExecute = true }); }
+        catch (Exception ex) { App.Log(ex); }
+    }
 
     public void ToggleDesktopMode()
     {
@@ -725,7 +733,9 @@ public sealed class AppController : IDisposable
         }
         if (hwnd == IntPtr.Zero)
         {
-            Notify($"Je n'ai pas trouvé la fenêtre de {bubble.Name}.");
+            // App du Store dont le programme déclaré n'est pas la vraie fenêtre : elle reste simplement ouverte normalement.
+            if (!bubble.LaunchPath.StartsWith(StoreApps.Prefix, StringComparison.OrdinalIgnoreCase))
+                Notify($"Je n'ai pas trouvé la fenêtre de {bubble.Name}.");
             return;
         }
         if (!_launcher.IsOpen) return;
@@ -772,7 +782,7 @@ public sealed class AppController : IDisposable
     {
         try
         {
-            Process.Start(new ProcessStartInfo(bubble.LaunchPath) { UseShellExecute = true });
+            StoreApps.Start(bubble.LaunchPath);
             return true;
         }
         catch (Exception ex)
@@ -801,6 +811,7 @@ public sealed class AppController : IDisposable
 
     public void HideFrame(BubbleFrame frame)
     {
+        frame.ExitWebFullscreen();
         if (_floating.Remove(frame))
         {
             // Fermeture d'un mini-lecteur ou d'une bulle traversable.
@@ -819,6 +830,8 @@ public sealed class AppController : IDisposable
     {
         var frame = _current;
         if (frame == null) return;
+        // Vidéo en « pleine bulle » : on en sort d'abord, l'en-tête revient pour la prochaine ouverture.
+        frame.ExitWebFullscreen();
         _current = null;
         _launcher.SetActive(null);
         if (frame.Bubble == SettingsBubble) _launcher.HideSettingsBubble();
@@ -861,7 +874,7 @@ public sealed class AppController : IDisposable
             Native.ProcessPath(hwnd)?.EndsWith("msedgewebview2.exe", StringComparison.OrdinalIgnoreCase) == true) return;
         _lastExternalForeground = hwnd;
 
-        if (_current != null && Settings.AutoHide && !_current.Pinned && !_busy)
+        if (_current != null && Settings.AutoHide && !_current.Pinned && !_busy && !_current.IsWebFullscreen)
             HideCurrent(restoreFocus: false);
     }
 

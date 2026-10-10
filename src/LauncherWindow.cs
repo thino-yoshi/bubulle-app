@@ -308,15 +308,24 @@ public sealed class LauncherWindow : Window
             var menu = new ContextMenu();
             if (b.IsWindowApp)
             {
-                // Passage manuel d'un mode à l'autre, pour cette app seulement.
-                var mode = new MenuItem();
+                // Passage manuel d'un mode à l'autre, pour cette app seulement. Le texte est choisi juste
+                // avant l'ouverture du menu (sinon il pouvait s'afficher vide, ou périmé après un changement de mode).
+                var mode = new MenuItem { Header = "Ouvrir dans sa bulle" };
                 mode.Click += (_, _) =>
                 {
                     if (_c.IsInBubble(b)) _c.ReleaseToWindow(b);
                     else _c.OpenInBubble(b);
                 };
-                menu.Opened += (_, _) => mode.Header = _c.IsInBubble(b) ? "Sortir en fenêtre normale" : "Ouvrir dans sa bulle";
+                v.ContextMenuOpening += (_, _) => mode.Header = _c.IsInBubble(b) ? "Sortir en fenêtre normale" : "Ouvrir dans sa bulle";
                 menu.Items.Add(mode);
+                menu.Items.Add(new Separator());
+            }
+            else if (b.IsWeb)
+            {
+                // Les sites restent en bulle, mais on peut toujours les ouvrir dans le navigateur.
+                var browser = new MenuItem { Header = "Ouvrir dans mon navigateur" };
+                browser.Click += (_, _) => _c.OpenInBrowser(b);
+                menu.Items.Add(browser);
                 menu.Items.Add(new Separator());
             }
             var customize = new MenuItem { Header = "Personnaliser… (nom et logo)" };
@@ -797,6 +806,13 @@ public sealed class LauncherWindow : Window
         };
 
         var menu = new ContextMenu();
+        // Changer de mode aussi depuis le clic droit (pas seulement avec la petite bulle en diagonale).
+        var switchMode = new MenuItem();
+        switchMode.Click += (_, _) => _c.ToggleDesktopMode();
+        g.ContextMenuOpening += (_, _) => switchMode.Header = _c.Settings.DesktopMode
+            ? "Passer en mode Bubulle (apps en bulle)" : "Passer en mode bureau (fenêtres normales)";
+        menu.Items.Add(switchMode);
+        menu.Items.Add(new Separator());
         var settings = new MenuItem { Header = "Paramètres" };
         settings.Click += (_, _) => _c.OpenSettings();
         var quit = new MenuItem { Header = "Quitter Bubulle" };

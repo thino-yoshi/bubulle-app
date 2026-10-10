@@ -384,6 +384,19 @@ public sealed class BubbleFrame : Window
         restore.Click += (_, _) => _c.ToggleMini(this);
         through.Click += (_, _) => _c.ToggleClickThrough(this);
 
+        // Opacité et volume restent réglables en mode mini (en petits boutons, la place est comptée).
+        var opacity = BuildMiniOpacityButton();
+        DockPanel.SetDock(opacity, Dock.Right);
+        bar.Children.Add(opacity);
+        if (Bubble.IsWeb || Bubble.IsWindowApp)
+        {
+            var volume = BuildVolumeButton();
+            ((Control)volume).Height = 24;
+            ((Control)volume).Width = 26;
+            DockPanel.SetDock(volume, Dock.Right);
+            bar.Children.Add(volume);
+        }
+
         if (HeaderIcon(Bubble, 14) is { } img)
         {
             img.Margin = new Thickness(0, 0, 6, 0);
@@ -401,6 +414,46 @@ public sealed class BubbleFrame : Window
         var grip = new Border { Child = bar, Background = Brushes.Transparent, Cursor = Cursors.SizeAll, ToolTip = "Tiens pour déplacer" };
         grip.MouseLeftButtonDown += (_, e) => { if (e.OriginalSource is not TextBlock { Parent: ButtonBase }) DragMove(); };
         return grip;
+    }
+
+    /// <summary>Bouton « opacité » du mode mini : sa jauge suit celle de l'en-tête normal.</summary>
+    private FrameworkElement BuildMiniOpacityButton()
+    {
+        var button = new ToggleButton { Content = Glyph("\uE793"), ToolTip = "Opacité", Height = 24, Width = 26 };
+        StyleButton(button);
+        var slider = new Slider
+        {
+            Minimum = 30, Maximum = 100, Value = _opacity.Value, Width = 130, IsSnapToTickEnabled = true, TickFrequency = 1,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        var label = new TextBlock { Foreground = Brushes.White, FontSize = 12.5, Width = 38, TextAlignment = TextAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
+        label.Text = $"{(int)_opacity.Value} %";
+        slider.ValueChanged += (_, _) =>
+        {
+            label.Text = $"{(int)slider.Value} %";
+            if ((int)_opacity.Value != (int)slider.Value) _opacity.Value = slider.Value;
+        };
+        _opacity.ValueChanged += (_, _) => { if ((int)slider.Value != (int)_opacity.Value) slider.Value = _opacity.Value; };
+        var row = new StackPanel { Orientation = Orientation.Horizontal };
+        row.Children.Add(slider);
+        row.Children.Add(label);
+        var popup = new Popup
+        {
+            PlacementTarget = button, Placement = PlacementMode.Bottom, HorizontalOffset = -80, VerticalOffset = 6,
+            StaysOpen = false, AllowsTransparency = true, PopupAnimation = PopupAnimation.Fade,
+            Child = new Border
+            {
+                CornerRadius = new CornerRadius(10),
+                Background = new SolidColorBrush(Color.FromArgb(0xF5, 0x1C, 0x21, 0x2B)),
+                BorderBrush = new SolidColorBrush(Color.FromArgb(0x99, LauncherWindow.Accent.R, LauncherWindow.Accent.G, LauncherWindow.Accent.B)),
+                BorderThickness = new Thickness(1), Padding = new Thickness(10, 4, 10, 4), Child = row,
+            },
+        };
+        button.Checked += (_, _) => popup.IsOpen = true;
+        button.Unchecked += (_, _) => popup.IsOpen = false;
+        popup.Closed += (_, _) => button.IsChecked = false;
+        button.MouseWheel += (_, e) => _opacity.Value = Math.Clamp(_opacity.Value + (e.Delta > 0 ? 5 : -5), 30, 100);
+        return button;
     }
 
     public void EnterMini(Rect rect)
@@ -639,9 +692,75 @@ public sealed class BubbleFrame : Window
             Title = core.DocumentTitle;
             _c.OnContentTitle(Bubble, core.DocumentTitle);
         };
+        // Plein écran d'une vidéo (stream, YouTube…) : la bulle prend tout l'écran, puis reprend sa place.
+        core.ContainsFullScreenElementChanged += (_, _) => SetWebFullscreen(core.ContainsFullScreenElement);
         await core.AddScriptToExecuteOnDocumentCreatedAsync(VolumeScript(Bubble.Volume / 100.0));
         core.IsMuted = Bubble.Volume == 0;
         core.Navigate(Bubble.Url);
+    }
+
+    // ---------- Plein écran des pages web ----------
+
+    private bool _webFullscreen;
+    private Visibility _headerBefore, _miniHeaderBefore;
+    private GridLength _headerRowBefore;
+    private Thickness _hostMarginBefore, _borderBefore;
+
+    /// <summary>
+    /// Une page passe en plein écran (bouton plein écran d'un lecteur vidéo) : « pleine bulle ». La vidéo remplit
+    /// toute la bulle, sans en-tête ni bord, mais la bulle garde sa taille, sa place et son opacité (par exemple
+    /// un mini-lecteur en haut à droite pendant une partie). En sortant (Échap ou bouton), l'en-tête revient.
+    /// </summary>
+    private void SetWebFullscreen(bool on)
+    {
+        if (on == _webFullscreen) return;
+        _webFullscreen = on;
+        var outer = Content as Border;
+        _enforcing = true;
+        try
+        {
+            if (on)
+            {
+                _headerBefore = _header.Visibility;
+                _miniHeaderBefore = _miniHeader.Visibility;
+                _headerRowBefore = _headerRow.Height;
+                _hostMarginBefore = _host.Margin;
+                _header.Visibility = Visibility.Collapsed;
+                _miniHeader.Visibility = Visibility.Collapsed;
+                _headerRow.Height = new GridLength(0);
+                _host.Margin = new Thickness(0);
+                if (outer != null)
+                {
+                    _borderBefore = outer.BorderThickness;
+                    outer.BorderThickness = new Thickness(0);
+                }
+                // La bulle garde sa taille, sa place, ses coins arrondis et son opacité : la vidéo la remplit entièrement.
+            }
+            else
+            {
+                _header.Visibility = _headerBefore;
+                _miniHeader.Visibility = _miniHeaderBefore;
+                _headerRow.Height = _headerRowBefore;
+                _host.Margin = _hostMarginBefore;
+                if (outer != null) outer.BorderThickness = _borderBefore;
+            }
+        }
+        finally
+        {
+            _enforcing = false;
+        }
+    }
+
+    /// <summary>Vidéo en « pleine bulle » : la bulle ne se cache pas quand le focus change (tu peux revenir au jeu).</summary>
+    public bool IsWebFullscreen => _webFullscreen;
+
+    /// <summary>Quitte le plein écran de la page (avant de cacher la bulle, par exemple).</summary>
+    public void ExitWebFullscreen()
+    {
+        if (!_webFullscreen) return;
+        try { _ = _web?.CoreWebView2?.ExecuteScriptAsync("document.fullscreenElement && document.exitFullscreen()"); }
+        catch (Exception ex) { App.Log(ex); }
+        SetWebFullscreen(false);
     }
 
     private static void OpenExternal(string url)
@@ -694,6 +813,7 @@ public sealed class BubbleFrame : Window
         ForceRepaint();
         ApplyStoredVolume();
         _sync.Start();
+        WatchNativeMoves(hwnd);
         return wasHidden;
     }
 
@@ -701,6 +821,7 @@ public sealed class BubbleFrame : Window
     public IntPtr DetachNative(bool minimize, bool restoreLook = true)
     {
         _sync.Stop();
+        WatchNativeMoves(IntPtr.Zero);
         MinWidth = DefaultMinWidth;
         MinHeight = DefaultMinHeight;
         var h = _native;
@@ -760,18 +881,21 @@ public sealed class BubbleFrame : Window
             _c.HideFrame(this);
             return;
         }
-        // Plein écran de l'app (stream Discord, vidéo…) : on la laisse faire, sans la forcer dans le cadre
-        // (sinon la bulle croit que l'app refuse de rétrécir et grandit à la taille de l'écran).
-        if (CoversItsMonitor(_native))
+        // Plein écran de l'app (vidéo HBO dans Chrome, stream Discord…) : elle reste « pleine bulle », remise
+        // à la taille de la bulle. La bulle ne grandit surtout pas à la taille de l'écran pour autant.
+        bool fullscreenAttempt = CoversItsMonitor(_native);
+        if (fullscreenAttempt)
         {
-            if (!_nativeFullscreen)
-            {
-                _nativeFullscreen = true;
-                _beforeFullscreen = new Rect(Left, Top, Width, Height);
-            }
-            return;
+            MinWidth = DefaultMinWidth;
+            MinHeight = DefaultMinHeight;
+            // Certaines apps (Chrome) reprennent aussitôt leur plein écran : après 3 essais en 2 secondes,
+            // on les laisse faire jusqu'à ce qu'elles en sortent, au lieu de se battre avec elles.
+            var now = DateTime.Now;
+            if ((now - _lastFullscreenFight).TotalSeconds > 2) _fullscreenFights = 0;
+            _lastFullscreenFight = now;
+            if (++_fullscreenFights > 3) return;
         }
-        if (_nativeFullscreen) LeaveNativeFullscreen();
+        else _fullscreenFights = 0;
         // L'app s'est ré-agrandie toute seule : on la remet à sa place dans le cadre.
         if (Native.IsZoomed(_native)) Native.ShowWindow(_native, Native.SW_RESTORE);
         if (_host.ActualWidth < 1) return;
@@ -781,7 +905,7 @@ public sealed class BubbleFrame : Window
         int w = (int)Math.Round(bottomRight.X - topLeft.X), h = (int)Math.Round(bottomRight.Y - topLeft.Y);
         if (Native.GetWindowRect(_native, out var r) && r.Left == x && r.Top == y && r.Width == w && r.Height == h) return;
         Native.SetWindowPos(_native, IntPtr.Zero, x, y, w, h, Native.SWP_NOZORDER | Native.SWP_NOACTIVATE);
-        EnforceNativeMinimum(w, h);
+        if (!fullscreenAttempt) EnforceNativeMinimum(w, h);
     }
 
     /// <summary>
@@ -823,10 +947,41 @@ public sealed class BubbleFrame : Window
 
     private bool _resyncing;
 
-    private bool _enforcing;
+    private IntPtr _moveHook;
+    private Native.WinEventProc? _moveProc;
 
-    private bool _nativeFullscreen;
-    private Rect _beforeFullscreen;
+    /// <summary>
+    /// Écoute les changements de taille / position de la fenêtre de l'app : si elle se met en plein écran ou
+    /// sort du cadre, elle y est remise tout de suite (au lieu d'attendre le contrôle régulier).
+    /// </summary>
+    private void WatchNativeMoves(IntPtr hwnd)
+    {
+        if (_moveHook != IntPtr.Zero)
+        {
+            Native.UnhookWinEvent(_moveHook);
+            _moveHook = IntPtr.Zero;
+        }
+        if (hwnd == IntPtr.Zero) return;
+        const uint EVENT_OBJECT_LOCATIONCHANGE = 0x800B;
+        Native.GetWindowThreadProcessId(hwnd, out uint pid);
+        _moveProc = (_, _, h, idObject, _, _, _) =>
+        {
+            if (h != _native || idObject != 0 || _syncQueued) return;
+            _syncQueued = true;
+            Dispatcher.BeginInvoke(() =>
+            {
+                _syncQueued = false;
+                SyncNative();
+            });
+        };
+        _moveHook = Native.SetWinEventHook(EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE, IntPtr.Zero, _moveProc, pid, 0, Native.WINEVENT_OUTOFCONTEXT);
+    }
+
+    private bool _syncQueued;
+    private int _fullscreenFights;
+    private DateTime _lastFullscreenFight;
+
+    private bool _enforcing;
 
     /// <summary>La fenêtre couvre tout son écran (plein écran) ? La bulle, elle, ne le fait jamais.</summary>
     private static bool CoversItsMonitor(IntPtr hwnd)
@@ -836,32 +991,7 @@ public sealed class BubbleFrame : Window
         return r.Left <= screen.Left && r.Top <= screen.Top && r.Right >= screen.Right && r.Bottom >= screen.Bottom;
     }
 
-    /// <summary>
-    /// Fin du plein écran : la bulle reprend sa taille d'avant (et ses tailles minimales normales),
-    /// et l'app perd à nouveau sa barre de titre si elle l'a remise en sortant du plein écran.
-    /// </summary>
-    private void LeaveNativeFullscreen()
-    {
-        _nativeFullscreen = false;
-        _enforcing = true;
-        try
-        {
-            MinWidth = DefaultMinWidth;
-            MinHeight = DefaultMinHeight;
-            Left = _beforeFullscreen.Left;
-            Top = _beforeFullscreen.Top;
-            Width = _beforeFullscreen.Width;
-            Height = _beforeFullscreen.Height;
-        }
-        finally
-        {
-            _enforcing = false;
-        }
-        Native.SetStyle(_native, Native.GetStyle(_native) & ~(Native.WS_CAPTION | Native.WS_THICKFRAME | Native.WS_MAXIMIZE));
-        Native.SetWindowPos(_native, Native.HWND_TOPMOST, 0, 0, 0, 0,
-            Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE | Native.SWP_FRAMECHANGED);
-        UpdateLayout();
-    }
+
 
     private void RaiseNative()
     {
@@ -882,13 +1012,15 @@ public sealed class BubbleFrame : Window
 
     // ---------- Volume ----------
 
-    private TextBlock? _volumeIcon;
+    private readonly System.Collections.Generic.List<TextBlock> _volumeIcons = new();
+    private readonly System.Collections.Generic.List<Slider> _volumeSliders = new();
 
     /// <summary>Haut-parleur dans la barre : un clic ouvre une jauge de volume pour cette bulle.</summary>
     private FrameworkElement BuildVolumeButton()
     {
-        _volumeIcon = Glyph(VolumeGlyph(Bubble.Volume));
-        var button = new ToggleButton { Content = _volumeIcon, ToolTip = "Volume de cette bulle" };
+        var icon = Glyph(VolumeGlyph(Bubble.Volume));
+        _volumeIcons.Add(icon);
+        var button = new ToggleButton { Content = icon, ToolTip = "Volume de cette bulle" };
         StyleButton(button);
 
         var slider = new Slider
@@ -906,12 +1038,15 @@ public sealed class BubbleFrame : Window
             if (slider.Value > 0) { beforeMute = (int)slider.Value; slider.Value = 0; }
             else slider.Value = beforeMute;
         };
+        _volumeSliders.Add(slider);
         void Update()
         {
             int v = (int)slider.Value;
             label.Text = $"{v} %";
-            _volumeIcon.Text = VolumeGlyph(v);
-            SetVolume(v);
+            foreach (var i in _volumeIcons) i.Text = VolumeGlyph(v);
+            // L'autre en-tête (normal / mini) suit la même valeur.
+            foreach (var other in _volumeSliders) if (other != slider && (int)other.Value != v) other.Value = v;
+            if (Bubble.Volume != v) SetVolume(v);
         }
         slider.ValueChanged += (_, _) => Update();
         label.Text = $"{Bubble.Volume} %";
