@@ -681,6 +681,42 @@ public sealed class BubbleFrame : Window
 
     // ---------- Contenu web ----------
 
+    /// <summary>Navigateur de la bulle (pour retrouver ses fenêtres, ex. lecteur miniature).</summary>
+    public uint WebBrowserPid => _web?.CoreWebView2?.BrowserProcessId ?? 0;
+
+    public bool HasWeb => _web?.CoreWebView2 != null;
+
+    /// <summary>Le site a fermé son pop-up (window.close) : la mini-bulle doit disparaître.</summary>
+    public event Action? WebClosed;
+
+    /// <summary>Pop-up d'un site, affiché dans cette bulle-fenêtre (mini-bulle) au lieu d'une fenêtre à part.</summary>
+    public async Task InitPopupAsync(CoreWebView2Environment env, CoreWebView2NewWindowRequestedEventArgs request, CoreWebView2Deferral deferral)
+    {
+        try
+        {
+            _web = new WebView2CompositionControl { DefaultBackgroundColor = System.Drawing.Color.FromArgb(0x12, 0x15, 0x1C), UseLayoutRounding = true };
+            RenderOptions.SetBitmapScalingMode(_web, BitmapScalingMode.NearestNeighbor);
+            _host.Child = _web;
+            await _web.EnsureCoreWebView2Async(env);
+            var core = _web.CoreWebView2;
+            core.WindowCloseRequested += (_, _) => WebClosed?.Invoke();
+            core.DocumentTitleChanged += (_, _) => { if (!string.IsNullOrWhiteSpace(core.DocumentTitle)) UpdateTitle(core.DocumentTitle); };
+            await core.AddScriptToExecuteOnDocumentCreatedAsync(VolumeScript(Bubble.Volume / 100.0));
+            request.NewWindow = core;
+            request.Handled = true;
+        }
+        finally
+        {
+            deferral.Complete();
+        }
+    }
+
+    private void UpdateTitle(string title)
+    {
+        Bubble.Name = title;
+        UpdateLook();
+    }
+
     public async Task InitWebAsync(CoreWebView2Environment env)
     {
         if (_web != null) return;
@@ -691,9 +727,13 @@ public sealed class BubbleFrame : Window
         var core = _web.CoreWebView2;
         core.NewWindowRequested += (_, e) =>
         {
-            // Popups de connexion (taille imposée) : on laisse WebView2 les ouvrir.
+            // Pop-up du site (taille imposée : lecteur détaché, connexion…) : il part dans une mini-bulle.
             // Liens classiques « nouvel onglet » : dans la bulle navigateur, sinon dans ton navigateur habituel.
-            if (e.WindowFeatures.HasSize || e.WindowFeatures.HasPosition) return;
+            if (e.WindowFeatures.HasSize || e.WindowFeatures.HasPosition)
+            {
+                if (!IsLinkedWindow) _c.OpenWebPopup(Bubble, e, e.GetDeferral());
+                return;
+            }
             e.Handled = true;
             if (_address != null) core.Navigate(e.Uri);
             else OpenExternal(e.Uri);

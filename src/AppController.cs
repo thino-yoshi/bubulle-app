@@ -111,7 +111,9 @@ public sealed class AppController : IDisposable
 
     private sealed class LinkedWindow
     {
+        /// <summary>Fenêtre Windows liée (app, lecteur miniature), ou zéro pour un pop-up de site affiché par Bubulle.</summary>
         public required IntPtr Hwnd;
+        public bool Closed;
         public required BubbleConfig Config;
         public required BubbleFrame Frame;
         public bool Unfolded = true;
@@ -143,20 +145,24 @@ public sealed class AppController : IDisposable
             {
                 // Première fois : les fenêtres déjà ouvertes de l'app ne sont pas « nouvelles ».
                 _knownWindows[bubble] = new HashSet<IntPtr>(windows);
+                LinkedLog($"{bubble.Name} est dans sa bulle : ses nouvelles fenêtres deviendront des mini-bulles ({windows.Count} déjà ouvertes).");
                 continue;
             }
             foreach (var h in windows)
             {
                 if (!known.Add(h) || h == native || _frames.Values.Any(f => f.NativeHwnd == h)) continue;
-                if (!IsLinkedCandidate(h, native)) continue;
+                var refused = LinkedRefusal(h, native);
+                LinkedLog($"{bubble.Name} : nouvelle fenêtre « {Native.WindowTitle(h)} » ({Native.ClassName(h)}) → {refused ?? "mini-bulle"}");
+                if (refused != null) continue;
                 AddLinked(bubble, h);
                 changed = true;
             }
         }
-        // Fenêtres liées fermées par l'app : leur mini-bulle disparaît.
+        ScanWebPictureInPicture(ref changed);
+        // Fenêtres liées fermées par l'app (ou pop-up fermé par le site) : leur mini-bulle disparaît.
         foreach (var (parent, list) in _linkedWindows.ToList())
         {
-            foreach (var lw in list.Where(l => !Native.IsWindow(l.Hwnd)).ToList())
+            foreach (var lw in list.Where(l => l.Closed || (l.Hwnd != IntPtr.Zero && !Native.IsWindow(l.Hwnd))).ToList())
             {
                 list.Remove(lw);
                 _floating.Remove(lw.Frame);
@@ -170,19 +176,37 @@ public sealed class AppController : IDisposable
         if (changed) PushLinked();
     }
 
-    /// <summary>Vraie fenêtre de contenu (pas un menu, une bulle d'aide ni une boîte de dialogue).</summary>
-    private static bool IsLinkedCandidate(IntPtr h, IntPtr parentNative)
+    /// <summary>
+    /// Vraie fenêtre de contenu (pas un menu, une bulle d'aide ni une boîte de dialogue) ? Retourne la raison
+    /// du refus, ou null si elle devient une mini-bulle.
+    /// </summary>
+    private static string? LinkedRefusal(IntPtr h, IntPtr parentNative)
     {
-        if (Native.ClassName(h) == "#32770") return false;
-        if (!Native.GetWindowRect(h, out var r) || r.Width < 200 || r.Height < 110) return false;
+        if (Native.ClassName(h) == "#32770") return "ignorée (boîte de dialogue)";
+        if (!Native.GetWindowRect(h, out var r) || r.Width < 200 || r.Height < 110) return $"ignorée (trop petite : {r.Width}×{r.Height})";
         var owner = Native.GetWindow(h, Native.GW_OWNER);
-        if (owner != IntPtr.Zero && owner != parentNative) return false;
+        if (owner != IntPtr.Zero && owner != parentNative) return "ignorée (appartient à une autre fenêtre)";
         long ex = Native.GetExStyle(h);
         bool tool = (ex & Native.WS_EX_TOOLWINDOW) != 0, topmost = (ex & 0x8L) != 0;
         // Les lecteurs miniatures sont souvent des fenêtres « outil » toujours au premier plan.
-        if (tool && !topmost) return false;
+        if (tool && !topmost) return "ignorée (fenêtre outil)";
         // Un vrai titre est exigé : les menus et listes déroulantes (ex. menu « ⋮ » de Chrome) n'en ont pas.
-        return Native.GetWindowTextLength(h) > 0;
+        return Native.GetWindowTextLength(h) > 0 ? null : "ignorée (sans titre : menu ou liste)";
+    }
+
+    /// <summary>Journal des fenêtres liées (linked.log), pour comprendre pourquoi une fenêtre n'est pas devenue mini-bulle.</summary>
+    private static void LinkedLog(string message)
+    {
+        try
+        {
+            var file = Path.Combine(AppSettings.Dir, "linked.log");
+            if (File.Exists(file) && new FileInfo(file).Length > 100_000) File.Delete(file);
+            File.AppendAllText(file, $"[{DateTime.Now:s}] {message}" + Environment.NewLine);
+        }
+        catch
+        {
+            // Rien à faire si le journal échoue.
+        }
     }
 
     private async void AddLinked(BubbleConfig parent, IntPtr hwnd)
@@ -250,7 +274,9 @@ public sealed class AppController : IDisposable
     private async void CloseLinked(LinkedWindow lw)
     {
         await lw.Frame.HideAnimatedAsync();
-        if (Native.IsWindow(lw.Hwnd)) Native.PostMessage(lw.Hwnd, Native.WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+        if (lw.Hwnd != IntPtr.Zero && Native.IsWindow(lw.Hwnd)) Native.PostMessage(lw.Hwnd, Native.WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+        // Pop-up de site : fermer sa page suffit (le site le voit comme fermé).
+        if (lw.Hwnd == IntPtr.Zero) lw.Frame.DisposeContent();
         await Task.Delay(400);
         // La mini-bulle disparaît (si l'app a refusé de fermer sa fenêtre, celle-ci redevient une fenêtre normale).
         foreach (var list in _linkedWindows.Values) list.Remove(lw);
@@ -259,6 +285,84 @@ public sealed class AppController : IDisposable
         _frames.Remove(lw.Config);
         lw.Frame.Close();
         PushLinked();
+    }
+
+    // ---------- Sites : pop-ups et lecteur miniature ----------
+
+    private BubbleConfig? _lastWebBubble;
+
+    /// <summary>Un site d'une bulle ouvre un pop-up : il s'affiche dans une mini-bulle sous sa bulle.</summary>
+    public async void OpenWebPopup(BubbleConfig parent, CoreWebView2NewWindowRequestedEventArgs request, CoreWebView2Deferral deferral)
+    {
+        try
+        {
+            var list = _linkedWindows.TryGetValue(parent, out var l) ? l : _linkedWindows[parent] = new List<LinkedWindow>();
+            var config = new BubbleConfig { Kind = "Web", Name = parent.Name, Url = request.Uri, IconPath = parent.IconPath, Volume = parent.Volume };
+            var frame = new BubbleFrame(this, config, Settings.DefaultOpacity);
+            frame.MarkLinked();
+            _frames[config] = frame;
+            _floating.Add(frame);
+            var linked = new LinkedWindow { Hwnd = IntPtr.Zero, Config = config, Frame = frame };
+            frame.WebClosed += () => _launcher.Dispatcher.BeginInvoke(() =>
+            {
+                linked.Closed = true;
+                ScanLinkedWindows();
+            });
+            list.Add(linked);
+            LinkedLog($"{parent.Name} : le site ouvre un pop-up ({request.Uri}) → mini-bulle");
+            PushLinked();
+
+            frame.PrepareShow();
+            var rect = LinkedRect(parent, list.Count - 1);
+            if (request.WindowFeatures.HasSize)
+            {
+                // Taille demandée par le site, sans dépasser l'écran.
+                var wa = Screens.WorkAreaDip(Settings);
+                rect.Width = Math.Clamp(request.WindowFeatures.Width, 260, wa.Width * 0.6);
+                rect.Height = Math.Clamp(request.WindowFeatures.Height + 30, 160, wa.Height * 0.7);
+                if (!Settings.IsLeft) rect.X = _launcher.LinkedAnchorDip(parent, list.Count - 1).StripLeft - 6 - rect.Width;
+            }
+            frame.EnterMini(rect);
+            frame.Show();
+            await frame.InitPopupAsync(await WebEnvironment(), request, deferral);
+            await frame.FadeInAsync();
+        }
+        catch (Exception ex)
+        {
+            App.Log(ex);
+            try { deferral.Complete(); } catch { /* Déjà terminé. */ }
+        }
+    }
+
+    private readonly HashSet<IntPtr> _knownWebWindows = new();
+    private bool _webWindowsPrimed;
+
+    /// <summary>
+    /// Lecteur miniature (« Picture-in-picture ») d'une vidéo d'un site : c'est une fenêtre du moteur web de Bubulle.
+    /// Elle est rattachée à la dernière bulle site ouverte, en mini-bulle.
+    /// </summary>
+    private void ScanWebPictureInPicture(ref bool changed)
+    {
+        var web = _frames.Values.FirstOrDefault(f => !f.IsLinkedWindow && f.WebBrowserPid != 0);
+        if (web == null) return;
+        var windows = WindowFinder.VisibleTopLevelWindows(web.WebBrowserPid);
+        if (!_webWindowsPrimed)
+        {
+            _webWindowsPrimed = true;
+            foreach (var h in windows) _knownWebWindows.Add(h);
+            return;
+        }
+        var parent = _lastWebBubble != null && Settings.Bubbles.Contains(_lastWebBubble) ? _lastWebBubble : Settings.Bubbles.FirstOrDefault(b => b.IsWeb);
+        if (parent == null) return;
+        foreach (var h in windows)
+        {
+            if (!_knownWebWindows.Add(h) || _frames.Values.Any(f => f.NativeHwnd == h)) continue;
+            var refused = LinkedRefusal(h, IntPtr.Zero);
+            LinkedLog($"{parent.Name} (site) : nouvelle fenêtre « {Native.WindowTitle(h)} » ({Native.ClassName(h)}) → {refused ?? "mini-bulle"}");
+            if (refused != null) continue;
+            AddLinked(parent, h);
+            changed = true;
+        }
     }
 
     private void PushLinked() => _launcher.SetLinked(_linkedWindows.ToDictionary(
@@ -552,6 +656,7 @@ public sealed class AppController : IDisposable
 
     private async Task ShowWeb(BubbleConfig bubble)
     {
+        _lastWebBubble = bubble;
         var frame = await GetReadyFrame(bubble);
         frame.Show();
         Activate(frame);
